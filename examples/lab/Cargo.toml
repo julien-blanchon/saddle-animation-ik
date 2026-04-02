@@ -7,14 +7,14 @@ publish = false
 [features]
 default = ["dev"]
 dev = ["dep:bevy_brp_extras"]
-e2e = ["dep:bevy_e2e"]
+e2e = ["dep:saddle-bevy-e2e"]
 
 [dependencies]
 bevy = { version = "0.18", features = ["bevy_remote", "serialize"] }
 saddle-animation-ik = { workspace = true }
 saddle-animation-ik-example-support = { path = "../support" }
 bevy_brp_extras = { version = "0.19", optional = true }
-bevy_e2e = { path = "../../../../../external_crates/bevy_e2e", features = ["json"], optional = true }
+saddle-bevy-e2e = { git = "https://github.com/julien-blanchon/saddle-bevy-e2e", features = ["json"], optional = true }
 
 [lints]
 workspace = true

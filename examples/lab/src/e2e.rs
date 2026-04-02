@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use bevy_e2e::{E2ESet, action::Action};
+use saddle_bevy_e2e::{E2ESet, action::Action};
 use saddle_animation_ik::IkSystems;
 
 use crate::scenarios;
@@ -8,7 +8,7 @@ pub struct IkLabE2EPlugin;
 
 impl Plugin for IkLabE2EPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(bevy_e2e::E2EPlugin);
+        app.add_plugins(saddle_bevy_e2e::E2EPlugin);
         app.configure_sets(Update, E2ESet.before(IkSystems::Prepare));
 
         let args: Vec<String> = std::env::args().collect();
@@ -19,7 +19,7 @@ impl Plugin for IkLabE2EPlugin {
                 if handoff {
                     scenario.actions.push(Action::Handoff);
                 }
-                bevy_e2e::init_scenario(app, scenario);
+                saddle_bevy_e2e::init_scenario(app, scenario);
             } else {
                 error!(
                     "[ik_lab:e2e] Unknown scenario '{name}'. Available: {:?}",
