@@ -1,7 +1,9 @@
 use saddle_animation_ik_example_support as support;
 
 use bevy::prelude::*;
-use saddle_animation_ik::{FootPlacement, IkChain, IkChainState, IkDebugSettings, IkJoint, IkPlugin};
+use saddle_animation_ik::{
+    FootPlacement, IkChain, IkChainState, IkDebugSettings, IkJoint, IkPlugin,
+};
 use support::{setup_scene, spawn_joint_chain, spawn_target};
 
 #[derive(Component)]

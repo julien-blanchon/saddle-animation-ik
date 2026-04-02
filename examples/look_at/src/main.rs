@@ -1,7 +1,9 @@
 use saddle_animation_ik_example_support as support;
 
 use bevy::prelude::*;
-use saddle_animation_ik::{IkChain, IkConstraint, IkDebugSettings, IkJoint, IkPlugin, LookAtTarget};
+use saddle_animation_ik::{
+    IkChain, IkConstraint, IkDebugSettings, IkJoint, IkPlugin, LookAtTarget,
+};
 use support::{OrbitMotion, animate_orbits, setup_scene, spawn_joint_chain, spawn_target};
 
 #[derive(Component)]

@@ -3,7 +3,9 @@ use saddle_animation_ik_example_support as support;
 use std::f32::consts::FRAC_PI_2;
 
 use bevy::prelude::*;
-use saddle_animation_ik::{IkChain, IkDebugSettings, IkJoint, IkPlugin, IkTarget, IkTargetAnchor, IkWeight};
+use saddle_animation_ik::{
+    IkChain, IkDebugSettings, IkJoint, IkPlugin, IkTarget, IkTargetAnchor, IkWeight,
+};
 use support::{setup_scene, spawn_joint_chain};
 
 #[derive(Component)]
