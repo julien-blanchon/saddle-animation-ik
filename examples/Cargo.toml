@@ -1,0 +1,21 @@
+[workspace]
+members = [
+    "support",
+    "basic",
+    "two_bone",
+    "foot_placement",
+    "look_at",
+    "support_hand",
+    "multi_chain",
+    "lab",
+]
+resolver = "3"
+
+[workspace.dependencies]
+bevy = "0.18"
+saddle-animation-ik = { path = ".." }
+
+[workspace.lints.clippy]
+too_many_arguments = "allow"
+type_complexity = "allow"
+nonstandard_macro_braces = "warn"
