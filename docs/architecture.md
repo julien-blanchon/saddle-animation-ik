@@ -10,6 +10,7 @@ The main design choices are:
 - the solver layer stays pure-Rust and Bevy-free except for math types
 - ECS glue is thin and mostly responsible for gathering inputs and writing transforms back
 - helper components such as `FootPlacement` and `LookAtTarget` resolve into the same target model as `IkTarget`
+- multi-chain body coordination is handled as a thin layer on top of per-chain solves instead of being baked into the core solver
 
 ## Chain Model
 
@@ -77,6 +78,8 @@ This keeps the behavior predictable, avoids NaNs on bad data, and makes the fail
 - direct parent-child joint hierarchies work naturally
 - extra helper parents can still work
 - the same runtime can correct plain transform chains, GLTF skeletons, and mechanical rigs
+
+After per-chain application, optional `FullBodyIkRig` components can aggregate the `suggested_root_offset` values from several chains and apply one coordinated translation to a shared root entity. This keeps the core solvers generic while still covering the most common gameplay-facing “full body” case: feet, hands, or support chains nudging the pelvis/body root together.
 
 ## Rotation Model
 

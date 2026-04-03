@@ -4,19 +4,53 @@ use bevy::{
     diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin},
     prelude::*,
 };
+use saddle_pane::prelude::*;
 use saddle_animation_ik::{IkChain, IkDebugSettings, IkPlugin, IkSolver, IkTarget, IkTargetAnchor};
 use support::{OrbitMotion, animate_orbits, setup_scene, spawn_joint_chain, spawn_target};
 
+#[derive(Resource, Pane)]
+#[pane(title = "IK Multi Chain")]
+struct MultiChainPane {
+    #[pane(tab = "Solve")]
+    debug_enabled: bool,
+    #[pane(tab = "Solve", slider, min = 1, max = 24)]
+    iterations: usize,
+    #[pane(tab = "Solve", slider, min = 0.001, max = 0.1, step = 0.001)]
+    tolerance: f32,
+    #[pane(tab = "Solve", slider, min = 0.0, max = 1.0, step = 0.05)]
+    overall_weight: f32,
+    #[pane(tab = "Runtime", monitor)]
+    chain_count: usize,
+    #[pane(tab = "Runtime", monitor)]
+    max_error: f32,
+}
+
+impl Default for MultiChainPane {
+    fn default() -> Self {
+        Self {
+            debug_enabled: false,
+            iterations: 12,
+            tolerance: 0.01,
+            overall_weight: 1.0,
+            chain_count: 0,
+            max_error: 0.0,
+        }
+    }
+}
+
 fn main() {
     App::new()
-        .add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window {
-                title: "ik multi chain".into(),
-                resolution: (1440, 900).into(),
+        .add_plugins((
+            DefaultPlugins.set(WindowPlugin {
+                primary_window: Some(Window {
+                    title: "ik multi chain".into(),
+                    resolution: (1440, 900).into(),
+                    ..default()
+                }),
                 ..default()
             }),
-            ..default()
-        }))
+            support::pane_plugins(),
+        ))
         .add_plugins((
             FrameTimeDiagnosticsPlugin::default(),
             LogDiagnosticsPlugin::default(),
@@ -25,9 +59,11 @@ fn main() {
             enabled: false,
             ..default()
         })
+        .init_resource::<MultiChainPane>()
+        .register_pane::<MultiChainPane>()
         .add_plugins(IkPlugin::default())
         .add_systems(Startup, setup)
-        .add_systems(Update, animate_orbits)
+        .add_systems(Update, (animate_orbits, sync_multi_chain_pane))
         .run();
 }
 
@@ -97,4 +133,32 @@ fn setup(
             ));
         }
     }
+}
+
+fn sync_multi_chain_pane(
+    mut pane: ResMut<MultiChainPane>,
+    mut debug: ResMut<IkDebugSettings>,
+    mut controllers: Query<(&mut IkChain, &saddle_animation_ik::IkChainState)>,
+) {
+    let mut chain_count = 0usize;
+    let mut max_error = 0.0f32;
+
+    for (mut chain, state) in &mut controllers {
+        chain_count += 1;
+        max_error = max_error.max(state.last_error);
+        if pane.is_changed() && !pane.is_added() {
+            chain.solve.iterations = pane.iterations;
+            chain.solve.tolerance = pane.tolerance;
+            chain.weight.overall = pane.overall_weight;
+        }
+    }
+
+    if pane.is_changed() && !pane.is_added() {
+        debug.enabled = pane.debug_enabled;
+    }
+
+    let pane = pane.bypass_change_detection();
+    pane.debug_enabled = debug.enabled;
+    pane.chain_count = chain_count;
+    pane.max_error = max_error;
 }

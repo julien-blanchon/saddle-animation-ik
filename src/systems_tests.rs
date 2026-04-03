@@ -4,10 +4,10 @@ use bevy::{
 };
 
 use crate::{
-    FootPlacement, IkChain, IkChainState, IkConstraint, IkDebugSettings, IkJoint, IkPlugin,
-    IkSolveSettings, IkSolveStatus, IkSolver, IkTarget, IkTargetSpace, IkWeight, LookAtTarget,
-    PoleTarget, ResolvedPole, ResolvedTarget, SolverChainState, SolverJointState,
-    compute_root_offset_hint, solve_chain,
+    FootPlacement, FullBodyIkChain, FullBodyIkRig, FullBodyIkRigState, IkChain, IkChainState,
+    IkConstraint, IkDebugSettings, IkJoint, IkPlugin, IkSolveSettings, IkSolveStatus, IkSolver,
+    IkTarget, IkTargetSpace, IkWeight, LookAtTarget, PoleTarget, ResolvedPole, ResolvedTarget,
+    SolverChainState, SolverJointState, compute_root_offset_hint, solve_chain,
 };
 
 fn straight_chain() -> SolverChainState {
@@ -471,5 +471,68 @@ fn local_space_targets_use_current_entity_transform() {
     assert!(tip_transform.rotation.dot(anchor_rotation).abs() > 0.95);
 }
 
+#[test]
+fn full_body_rig_aggregates_chain_root_offsets() {
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins);
+    app.add_plugins(IkPlugin::always_on(Update));
+
+    let root = app
+        .world_mut()
+        .spawn((
+            Transform::from_xyz(0.0, 1.6, 0.0),
+            GlobalTransform::IDENTITY,
+        ))
+        .id();
+    let left_chain = app
+        .world_mut()
+        .spawn(IkChainState {
+            suggested_root_offset: Vec3::new(0.0, 0.2, 0.0),
+            last_error: 0.08,
+            ..default()
+        })
+        .id();
+    let right_chain = app
+        .world_mut()
+        .spawn(IkChainState {
+            suggested_root_offset: Vec3::new(0.0, 0.4, 0.0),
+            last_error: 0.14,
+            ..default()
+        })
+        .id();
+
+    let rig = app
+        .world_mut()
+        .spawn(
+            FullBodyIkRig::new(root)
+                .with_root_axis(Vec3::Y)
+                .with_max_root_offset(0.5),
+        )
+        .id();
+    {
+        let mut rig_component = app.world_mut().get_mut::<FullBodyIkRig>(rig).unwrap();
+        rig_component.chains = vec![
+            FullBodyIkChain::new(left_chain).with_influence(1.0),
+            FullBodyIkChain::new(right_chain).with_influence(2.0),
+        ];
+    }
+
+    app.update();
+
+    let root_transform = app.world().get::<Transform>(root).unwrap();
+    assert!((root_transform.translation.y - 1.933_333_4).abs() < 0.001);
+
+    let rig_state = app.world().get::<FullBodyIkRigState>(rig).unwrap();
+    assert_eq!(rig_state.active_chains, 2);
+    assert!((rig_state.combined_root_offset.y - 0.333_333_34).abs() < 0.001);
+    assert!((rig_state.max_chain_error - 0.14).abs() < 0.001);
+}
+
 #[allow(dead_code)]
-fn _api_surface_examples(_foot: FootPlacement, _look_at: LookAtTarget, _pole: PoleTarget) {}
+fn _api_surface_examples(
+    _foot: FootPlacement,
+    _look_at: LookAtTarget,
+    _pole: PoleTarget,
+    _rig: FullBodyIkRig,
+) {
+}

@@ -119,6 +119,34 @@ This document lists the public tuning surface for `saddle-animation-ik` in v0.1.
 | `max_distance` | `f32` | `0.35` | `>= 0` | Clamp on the hint magnitude | Tiny values can hide useful hints |
 | `weight` | `f32` | `1.0` | `0.0..=1.0` | Blend of the final hint | Zero disables the hint |
 
+## `FullBodyIkRig`
+
+| Field | Type | Default | Valid Range | Effect | Common Failure Mode |
+| --- | --- | --- | --- | --- | --- |
+| `enabled` | `bool` | `true` | `true` or `false` | Enables the rig coordinator | Disabled rigs stop applying coordinated root motion |
+| `root_entity` | `Entity` | required | must exist | Shared body/root entity that receives the aggregated offset | Missing roots leave the state populated but nothing moves |
+| `chains` | `Vec<FullBodyIkChain>` | `[]` | any length | Chains whose `suggested_root_offset` values feed the coordinator | Forgetting to register a chain makes the rig look inert |
+| `root_axis` | `Vec3` | `Vec3::Y` | non-zero recommended | Axis along which the final root motion is projected | Wrong axis makes the body shift in the wrong direction |
+| `max_root_offset` | `f32` | `0.45` | `>= 0` | Clamp for the aggregated root offset magnitude | Very low values hide useful foot-placement correction |
+| `root_blend` | `f32` | `1.0` | `0.0..=1.0` | Blend factor for the final root offset | Low values make the full-body response feel mushy |
+| `apply_translation` | `bool` | `true` | `true` or `false` | Applies the result to the root transform automatically | Turning this off requires the consumer to read `FullBodyIkRigState` manually |
+
+## `FullBodyIkChain`
+
+| Field | Type | Default | Valid Range | Effect | Common Failure Mode |
+| --- | --- | --- | --- | --- | --- |
+| `chain_entity` | `Entity` | required | must exist | Source chain contributing a root-offset hint | Missing chain entities silently reduce the rig response |
+| `influence` | `f32` | `1.0` | `> 0` recommended | Relative weight of that chain in the final average | Large mismatches can make one limb dominate the full-body solve |
+
+## `FullBodyIkRigState`
+
+| Field | Type | Default | Effect | Notes |
+| --- | --- | --- | --- | --- |
+| `authored_root_translation` | `Vec3` | `Vec3::ZERO` | Last authored root translation captured before rig application | Lets the rig apply an offset without permanently drifting the root |
+| `combined_root_offset` | `Vec3` | `Vec3::ZERO` | Aggregated root translation applied this frame | Good E2E/debug surface for pelvis/body adjustment |
+| `active_chains` | `usize` | `0` | Number of contributing chains this frame | Useful for diagnosing missing chain links |
+| `max_chain_error` | `f32` | `0.0` | Largest contributing chain error this frame | Helps spot when one limb is forcing a bad overall body correction |
+
 ## `IkGlobalSettings`
 
 | Field | Type | Default | Valid Range | Effect | Common Failure Mode |

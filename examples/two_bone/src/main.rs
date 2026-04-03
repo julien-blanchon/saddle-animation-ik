@@ -1,6 +1,7 @@
 use saddle_animation_ik_example_support as support;
 
 use bevy::prelude::*;
+use saddle_pane::prelude::*;
 use saddle_animation_ik::{
     IkChain, IkConstraint, IkDebugSettings, IkPlugin, IkSolver, IkTarget, IkTargetAnchor,
     PoleTarget,
@@ -13,23 +14,58 @@ struct PoleMarker;
 #[derive(Component)]
 struct TwoBoneController;
 
+#[derive(Resource, Pane)]
+#[pane(title = "IK Two Bone")]
+struct TwoBonePane {
+    #[pane(tab = "Solve")]
+    debug_enabled: bool,
+    #[pane(tab = "Solve", slider, min = 1, max = 24)]
+    iterations: usize,
+    #[pane(tab = "Solve", slider, min = 0.001, max = 0.1, step = 0.001)]
+    tolerance: f32,
+    #[pane(tab = "Solve", slider, min = 0.0, max = 1.0, step = 0.05)]
+    overall_weight: f32,
+    #[pane(tab = "Target", slider, min = 0.0, max = 1.0, step = 0.05)]
+    pole_weight: f32,
+    #[pane(tab = "Runtime", monitor)]
+    reach_error: f32,
+}
+
+impl Default for TwoBonePane {
+    fn default() -> Self {
+        Self {
+            debug_enabled: true,
+            iterations: 12,
+            tolerance: 0.01,
+            overall_weight: 1.0,
+            pole_weight: 1.0,
+            reach_error: 0.0,
+        }
+    }
+}
+
 fn main() {
     App::new()
-        .add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window {
-                title: "ik two bone".into(),
-                resolution: (1280, 720).into(),
+        .add_plugins((
+            DefaultPlugins.set(WindowPlugin {
+                primary_window: Some(Window {
+                    title: "ik two bone".into(),
+                    resolution: (1280, 720).into(),
+                    ..default()
+                }),
                 ..default()
             }),
-            ..default()
-        }))
+            support::pane_plugins(),
+        ))
         .insert_resource(IkDebugSettings {
             enabled: true,
             ..default()
         })
+        .init_resource::<TwoBonePane>()
+        .register_pane::<TwoBonePane>()
         .add_plugins(IkPlugin::default())
         .add_systems(Startup, setup)
-        .add_systems(Update, (animate_orbits, sync_pole_target))
+        .add_systems(Update, (animate_orbits, sync_pole_target, sync_two_bone_pane))
         .run();
 }
 
@@ -124,4 +160,26 @@ fn sync_pole_target(
     mut controller: Single<&mut PoleTarget, With<TwoBoneController>>,
 ) {
     controller.point = pole.translation;
+}
+
+fn sync_two_bone_pane(
+    mut pane: ResMut<TwoBonePane>,
+    mut debug: ResMut<IkDebugSettings>,
+    mut controller: Single<(&mut IkChain, &mut PoleTarget, &saddle_animation_ik::IkChainState), With<TwoBoneController>>,
+) {
+    if pane.is_changed() && !pane.is_added() {
+        debug.enabled = pane.debug_enabled;
+        controller.0.solve.iterations = pane.iterations;
+        controller.0.solve.tolerance = pane.tolerance;
+        controller.0.weight.overall = pane.overall_weight;
+        controller.1.weight = pane.pole_weight;
+    }
+
+    let pane = pane.bypass_change_detection();
+    pane.debug_enabled = debug.enabled;
+    pane.iterations = controller.0.solve.iterations;
+    pane.tolerance = controller.0.solve.tolerance;
+    pane.overall_weight = controller.0.weight.overall;
+    pane.pole_weight = controller.1.weight;
+    pane.reach_error = controller.2.last_error;
 }

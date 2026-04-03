@@ -3,6 +3,7 @@ use saddle_animation_ik_example_support as support;
 use std::f32::consts::FRAC_PI_2;
 
 use bevy::prelude::*;
+use saddle_pane::prelude::*;
 use saddle_animation_ik::{
     IkChain, IkDebugSettings, IkJoint, IkPlugin, IkTarget, IkTargetAnchor, IkWeight,
 };
@@ -11,23 +12,61 @@ use support::{setup_scene, spawn_joint_chain};
 #[derive(Component)]
 struct GripRig;
 
+#[derive(Component)]
+struct SupportHandController;
+
+#[derive(Resource, Pane)]
+#[pane(title = "IK Support Hand")]
+struct SupportHandPane {
+    #[pane(tab = "Solve")]
+    debug_enabled: bool,
+    #[pane(tab = "Solve", slider, min = 1, max = 24)]
+    iterations: usize,
+    #[pane(tab = "Solve", slider, min = 0.001, max = 0.1, step = 0.001)]
+    tolerance: f32,
+    #[pane(tab = "Solve", slider, min = 0.0, max = 1.0, step = 0.05)]
+    overall_weight: f32,
+    #[pane(tab = "Target", slider, min = 0.0, max = 1.0, step = 0.05)]
+    rotation_weight: f32,
+    #[pane(tab = "Runtime", monitor)]
+    grip_error: f32,
+}
+
+impl Default for SupportHandPane {
+    fn default() -> Self {
+        Self {
+            debug_enabled: true,
+            iterations: 12,
+            tolerance: 0.01,
+            overall_weight: 0.92,
+            rotation_weight: 1.0,
+            grip_error: 0.0,
+        }
+    }
+}
+
 fn main() {
     App::new()
-        .add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window {
-                title: "ik support hand".into(),
-                resolution: (1280, 720).into(),
+        .add_plugins((
+            DefaultPlugins.set(WindowPlugin {
+                primary_window: Some(Window {
+                    title: "ik support hand".into(),
+                    resolution: (1280, 720).into(),
+                    ..default()
+                }),
                 ..default()
             }),
-            ..default()
-        }))
+            support::pane_plugins(),
+        ))
         .insert_resource(IkDebugSettings {
             enabled: true,
             ..default()
         })
+        .init_resource::<SupportHandPane>()
+        .register_pane::<SupportHandPane>()
         .add_plugins(IkPlugin::default())
         .add_systems(Startup, setup)
-        .add_systems(Update, animate_grip_rig)
+        .add_systems(Update, (animate_grip_rig, sync_support_hand_pane))
         .run();
 }
 
@@ -103,6 +142,7 @@ fn setup(
 
     commands.spawn((
         Name::new("Support Hand Controller"),
+        SupportHandController,
         IkChain {
             joints,
             weight: IkWeight {
@@ -141,4 +181,26 @@ fn animate_grip_rig(time: Res<Time>, mut grip_rig: Single<&mut Transform, With<G
         (t * 1.15).sin() * 0.18,
         0.0,
     );
+}
+
+fn sync_support_hand_pane(
+    mut pane: ResMut<SupportHandPane>,
+    mut debug: ResMut<IkDebugSettings>,
+    mut controller: Single<(&mut IkChain, &mut IkTarget, &saddle_animation_ik::IkChainState), With<SupportHandController>>,
+) {
+    if pane.is_changed() && !pane.is_added() {
+        debug.enabled = pane.debug_enabled;
+        controller.0.solve.iterations = pane.iterations;
+        controller.0.solve.tolerance = pane.tolerance;
+        controller.0.weight.overall = pane.overall_weight;
+        controller.1.weight.rotation = pane.rotation_weight;
+    }
+
+    let pane = pane.bypass_change_detection();
+    pane.debug_enabled = debug.enabled;
+    pane.iterations = controller.0.solve.iterations;
+    pane.tolerance = controller.0.solve.tolerance;
+    pane.overall_weight = controller.0.weight.overall;
+    pane.rotation_weight = controller.1.weight.rotation;
+    pane.grip_error = controller.2.last_error;
 }

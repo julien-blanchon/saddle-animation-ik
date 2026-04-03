@@ -1,28 +1,64 @@
 use saddle_animation_ik_example_support as support;
 
 use bevy::prelude::*;
+use saddle_pane::prelude::*;
 use saddle_animation_ik::{
     IkChain, IkDebugSettings, IkPlugin, IkTarget, IkTargetAnchor, PoleTarget,
 };
 use support::{OrbitMotion, animate_orbits, setup_scene, spawn_joint_chain, spawn_target};
 
+#[derive(Component)]
+struct BasicReachController;
+
+#[derive(Resource, Pane)]
+#[pane(title = "IK Basic Reach")]
+struct BasicPane {
+    #[pane(tab = "Solve")]
+    debug_enabled: bool,
+    #[pane(tab = "Solve", slider, min = 1, max = 24)]
+    iterations: usize,
+    #[pane(tab = "Solve", slider, min = 0.001, max = 0.1, step = 0.001)]
+    tolerance: f32,
+    #[pane(tab = "Solve", slider, min = 0.0, max = 1.0, step = 0.05)]
+    overall_weight: f32,
+    #[pane(tab = "Runtime", monitor)]
+    reach_error: f32,
+}
+
+impl Default for BasicPane {
+    fn default() -> Self {
+        Self {
+            debug_enabled: true,
+            iterations: 12,
+            tolerance: 0.01,
+            overall_weight: 1.0,
+            reach_error: 0.0,
+        }
+    }
+}
+
 fn main() {
     App::new()
-        .add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window {
-                title: "ik basic reach".into(),
-                resolution: (1280, 720).into(),
+        .add_plugins((
+            DefaultPlugins.set(WindowPlugin {
+                primary_window: Some(Window {
+                    title: "ik basic reach".into(),
+                    resolution: (1280, 720).into(),
+                    ..default()
+                }),
                 ..default()
             }),
-            ..default()
-        }))
+            support::pane_plugins(),
+        ))
         .insert_resource(IkDebugSettings {
             enabled: true,
             ..default()
         })
+        .init_resource::<BasicPane>()
+        .register_pane::<BasicPane>()
         .add_plugins(IkPlugin::default())
         .add_systems(Startup, setup)
-        .add_systems(Update, animate_orbits)
+        .add_systems(Update, (animate_orbits, sync_basic_pane))
         .run();
 }
 
@@ -67,6 +103,7 @@ fn setup(
 
     commands.spawn((
         Name::new("Basic Reach Controller"),
+        BasicReachController,
         IkChain {
             joints,
             ..default()
@@ -82,4 +119,24 @@ fn setup(
             ..default()
         },
     ));
+}
+
+fn sync_basic_pane(
+    mut pane: ResMut<BasicPane>,
+    mut debug: ResMut<IkDebugSettings>,
+    mut controller: Single<(&mut IkChain, &saddle_animation_ik::IkChainState), With<BasicReachController>>,
+) {
+    if pane.is_changed() && !pane.is_added() {
+        debug.enabled = pane.debug_enabled;
+        controller.0.solve.iterations = pane.iterations;
+        controller.0.solve.tolerance = pane.tolerance;
+        controller.0.weight.overall = pane.overall_weight;
+    }
+
+    let pane = pane.bypass_change_detection();
+    pane.debug_enabled = debug.enabled;
+    pane.iterations = controller.0.solve.iterations;
+    pane.tolerance = controller.0.solve.tolerance;
+    pane.overall_weight = controller.0.weight.overall;
+    pane.reach_error = controller.1.last_error;
 }

@@ -6,8 +6,8 @@ use bevy::transform::helper::TransformHelper;
 
 use crate::{
     components::{
-        FootPlacement, IkChain, IkChainState, IkJoint, IkTarget, IkTargetAnchor, LookAtTarget,
-        PoleTarget,
+        FootPlacement, FullBodyIkRig, FullBodyIkRigState, IkChain, IkChainState, IkJoint, IkTarget,
+        IkTargetAnchor, LookAtTarget, PoleTarget,
     },
     config::{IkGlobalSettings, IkSolveStatus, IkWeight},
     constraints::IkConstraint,
@@ -75,6 +75,31 @@ pub(crate) fn ensure_chain_state(
                 invalid_logged: false,
             });
         }
+    }
+}
+
+pub(crate) fn ensure_full_body_rig_state(
+    mut commands: Commands,
+    rigs: Query<(Entity, Option<&FullBodyIkRigState>), With<FullBodyIkRig>>,
+) {
+    for (entity, state) in &rigs {
+        if state.is_none() {
+            commands
+                .entity(entity)
+                .insert(FullBodyIkRigState::default());
+        }
+    }
+}
+
+pub(crate) fn capture_full_body_authored_roots(
+    mut rigs: Query<(&FullBodyIkRig, &mut FullBodyIkRigState)>,
+    roots: Query<&Transform>,
+) {
+    for (rig, mut state) in &mut rigs {
+        let Ok(root) = roots.get(rig.root_entity) else {
+            continue;
+        };
+        state.authored_root_translation = root.translation;
     }
 }
 
@@ -279,6 +304,70 @@ pub(crate) fn apply_chains(
 
         // Keep the state component in the world even if the prepared chain vanished.
         let _ = entity;
+    }
+}
+
+pub(crate) fn apply_full_body_rigs(
+    mut rigs: Query<(&FullBodyIkRig, &mut FullBodyIkRigState)>,
+    chain_states: Query<&IkChainState>,
+    mut transforms: Query<&mut Transform>,
+) {
+    for (rig, mut state) in &mut rigs {
+        if !rig.enabled {
+            state.combined_root_offset = Vec3::ZERO;
+            state.active_chains = 0;
+            state.max_chain_error = 0.0;
+            continue;
+        }
+
+        let mut weighted_offset = Vec3::ZERO;
+        let mut total_influence = 0.0;
+        let mut active_chains = 0usize;
+        let mut max_chain_error = 0.0f32;
+
+        for chain in &rig.chains {
+            if !chain.influence.is_finite() || chain.influence <= 0.0 {
+                continue;
+            }
+
+            let Ok(chain_state) = chain_states.get(chain.chain_entity) else {
+                continue;
+            };
+            if !chain_state.suggested_root_offset.is_finite() {
+                continue;
+            }
+
+            weighted_offset += chain_state.suggested_root_offset * chain.influence;
+            total_influence += chain.influence;
+            active_chains += 1;
+            max_chain_error = max_chain_error.max(chain_state.last_error);
+        }
+
+        let mut combined_offset = if total_influence > 0.0 {
+            weighted_offset / total_influence
+        } else {
+            Vec3::ZERO
+        };
+        let axis = safe_normalize(rig.root_axis, Vec3::Y);
+        combined_offset = axis * combined_offset.dot(axis);
+
+        let max_root_offset = rig.max_root_offset.max(0.0);
+        if combined_offset.length_squared() > max_root_offset * max_root_offset
+            && max_root_offset > 0.0
+        {
+            combined_offset = combined_offset.normalize_or_zero() * max_root_offset;
+        }
+        combined_offset *= rig.root_blend.clamp(0.0, 1.0);
+
+        state.combined_root_offset = combined_offset;
+        state.active_chains = active_chains;
+        state.max_chain_error = max_chain_error;
+
+        if rig.apply_translation
+            && let Ok(mut root) = transforms.get_mut(rig.root_entity)
+        {
+            root.translation = state.authored_root_translation + combined_offset;
+        }
     }
 }
 

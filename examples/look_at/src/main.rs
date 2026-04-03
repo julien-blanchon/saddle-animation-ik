@@ -1,6 +1,7 @@
 use saddle_animation_ik_example_support as support;
 
 use bevy::prelude::*;
+use saddle_pane::prelude::*;
 use saddle_animation_ik::{
     IkChain, IkConstraint, IkDebugSettings, IkJoint, IkPlugin, LookAtTarget,
 };
@@ -12,23 +13,58 @@ struct LookTarget;
 #[derive(Component)]
 struct LookController;
 
+#[derive(Resource, Pane)]
+#[pane(title = "IK Look At")]
+struct LookPane {
+    #[pane(tab = "Solve")]
+    debug_enabled: bool,
+    #[pane(tab = "Solve", slider, min = 1, max = 24)]
+    iterations: usize,
+    #[pane(tab = "Solve", slider, min = 0.001, max = 0.1, step = 0.001)]
+    tolerance: f32,
+    #[pane(tab = "Target", slider, min = 0.5, max = 12.0, step = 0.1)]
+    reach_distance: f32,
+    #[pane(tab = "Target", slider, min = 0.0, max = 1.0, step = 0.05)]
+    rotation_weight: f32,
+    #[pane(tab = "Runtime", monitor)]
+    look_error: f32,
+}
+
+impl Default for LookPane {
+    fn default() -> Self {
+        Self {
+            debug_enabled: true,
+            iterations: 12,
+            tolerance: 0.01,
+            reach_distance: 6.0,
+            rotation_weight: 1.0,
+            look_error: 0.0,
+        }
+    }
+}
+
 fn main() {
     App::new()
-        .add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window {
-                title: "ik look at".into(),
-                resolution: (1280, 720).into(),
+        .add_plugins((
+            DefaultPlugins.set(WindowPlugin {
+                primary_window: Some(Window {
+                    title: "ik look at".into(),
+                    resolution: (1280, 720).into(),
+                    ..default()
+                }),
                 ..default()
             }),
-            ..default()
-        }))
+            support::pane_plugins(),
+        ))
         .insert_resource(IkDebugSettings {
             enabled: true,
             ..default()
         })
+        .init_resource::<LookPane>()
+        .register_pane::<LookPane>()
         .add_plugins(IkPlugin::default())
         .add_systems(Startup, setup)
-        .add_systems(Update, (animate_orbits, sync_look_target))
+        .add_systems(Update, (animate_orbits, sync_look_target, sync_look_pane))
         .run();
 }
 
@@ -110,4 +146,26 @@ fn sync_look_target(
     mut controller: Single<&mut LookAtTarget, With<LookController>>,
 ) {
     controller.point = target.translation;
+}
+
+fn sync_look_pane(
+    mut pane: ResMut<LookPane>,
+    mut debug: ResMut<IkDebugSettings>,
+    mut controller: Single<(&mut IkChain, &mut LookAtTarget, &saddle_animation_ik::IkChainState), With<LookController>>,
+) {
+    if pane.is_changed() && !pane.is_added() {
+        debug.enabled = pane.debug_enabled;
+        controller.0.solve.iterations = pane.iterations;
+        controller.0.solve.tolerance = pane.tolerance;
+        controller.1.reach_distance = Some(pane.reach_distance);
+        controller.1.weight.rotation = pane.rotation_weight;
+    }
+
+    let pane = pane.bypass_change_detection();
+    pane.debug_enabled = debug.enabled;
+    pane.iterations = controller.0.solve.iterations;
+    pane.tolerance = controller.0.solve.tolerance;
+    pane.reach_distance = controller.1.reach_distance.unwrap_or(0.0);
+    pane.rotation_weight = controller.1.weight.rotation;
+    pane.look_error = controller.2.last_error;
 }

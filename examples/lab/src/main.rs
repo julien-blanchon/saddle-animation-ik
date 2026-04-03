@@ -12,9 +12,11 @@ use bevy::prelude::*;
 use bevy::remote::{RemotePlugin, http::RemoteHttpPlugin};
 #[cfg(feature = "dev")]
 use bevy_brp_extras::BrpExtrasPlugin;
+use saddle_pane::prelude::*;
 use saddle_animation_ik::{
-    FootPlacement, IkChain, IkChainState, IkConstraint, IkDebugDraw, IkDebugSettings, IkJoint,
-    IkPlugin, IkTarget, IkTargetAnchor, LookAtTarget, PoleTarget,
+    FootPlacement, FullBodyIkRig, FullBodyIkRigState, IkChain, IkChainState, IkConstraint,
+    IkDebugDraw, IkDebugSettings, IkJoint, IkPlugin, IkTarget, IkTargetAnchor, LookAtTarget,
+    PoleTarget,
 };
 use support::{OrbitMotion, animate_orbits, setup_scene, spawn_joint_chain, spawn_target};
 
@@ -58,6 +60,42 @@ pub struct LabDiagnostics {
     pub debug_enabled: bool,
 }
 
+#[derive(Resource, Pane)]
+#[pane(title = "IK Lab")]
+struct LabPane {
+    #[pane(tab = "Solve")]
+    debug_enabled: bool,
+    #[pane(tab = "Solve", slider, min = 1, max = 24)]
+    iterations: usize,
+    #[pane(tab = "Solve", slider, min = 0.001, max = 0.1, step = 0.001)]
+    tolerance: f32,
+    #[pane(tab = "Foot", slider, min = 0.0, max = 0.3, step = 0.01)]
+    ankle_offset: f32,
+    #[pane(tab = "Foot", slider, min = 0.0, max = 0.8, step = 0.02)]
+    max_root_offset: f32,
+    #[pane(tab = "Runtime", monitor)]
+    reach_error: f32,
+    #[pane(tab = "Runtime", monitor)]
+    foot_error: f32,
+    #[pane(tab = "Runtime", monitor)]
+    look_error: f32,
+}
+
+impl Default for LabPane {
+    fn default() -> Self {
+        Self {
+            debug_enabled: true,
+            iterations: 12,
+            tolerance: 0.01,
+            ankle_offset: 0.08,
+            max_root_offset: 0.4,
+            reach_error: 0.0,
+            foot_error: 0.0,
+            look_error: 0.0,
+        }
+    }
+}
+
 impl Default for LabDiagnostics {
     fn default() -> Self {
         Self {
@@ -79,15 +117,20 @@ fn main() {
         ..default()
     });
     app.init_resource::<LabDiagnostics>();
+    app.init_resource::<LabPane>();
     app.register_type::<LabDiagnostics>();
-    app.add_plugins(DefaultPlugins.set(WindowPlugin {
-        primary_window: Some(Window {
-            title: "ik crate-local lab".into(),
-            resolution: (1520, 860).into(),
+    app.add_plugins((
+        DefaultPlugins.set(WindowPlugin {
+            primary_window: Some(Window {
+                title: "ik crate-local lab".into(),
+                resolution: (1520, 860).into(),
+                ..default()
+            }),
             ..default()
         }),
-        ..default()
-    }));
+        support::pane_plugins(),
+    ));
+    app.register_pane::<LabPane>();
     #[cfg(feature = "dev")]
     app.add_plugins(RemotePlugin::default());
     #[cfg(feature = "dev")]
@@ -106,6 +149,7 @@ fn main() {
             sync_look_target,
             update_foot_contact,
             update_diagnostics,
+            sync_lab_pane,
             update_overlay,
         ),
     );
@@ -289,7 +333,8 @@ fn setup_foot_section(
     );
     commands.entity(probe).insert(FootProbe);
 
-    commands.spawn((
+    let foot_controller = commands
+        .spawn((
         Name::new("Foot Controller"),
         FootController,
         IkDebugDraw::default(),
@@ -306,6 +351,14 @@ fn setup_foot_section(
             root_offset_hint: Some(default()),
             ..default()
         },
+    ))
+        .id();
+    commands.spawn((
+        Name::new("Foot Full Body Rig"),
+        FullBodyIkRig::new(pelvis)
+            .with_chain(foot_controller)
+            .with_root_axis(Vec3::Y)
+            .with_max_root_offset(0.4),
     ));
 }
 
@@ -393,7 +446,6 @@ fn update_foot_contact(
     time: Res<Time>,
     mut probe: Single<&mut Transform, With<FootProbe>>,
     mut controller: Single<(&mut FootPlacement, &IkChainState), With<FootController>>,
-    mut pelvis: Single<&mut Transform, (With<Pelvis>, Without<FootProbe>)>,
 ) {
     let x = (time.elapsed_secs() * 0.65).sin() * 1.45;
     let z = if x < -0.4 {
@@ -414,25 +466,81 @@ fn update_foot_contact(
     probe.translation = Vec3::new(x, height, z);
     controller.0.contact_point = probe.translation;
     controller.0.contact_normal = Vec3::Y;
-    pelvis.translation = PELVIS_BASE + controller.1.suggested_root_offset;
 }
 
 fn update_diagnostics(
     debug: Res<IkDebugSettings>,
     reach_state: Single<&IkChainState, With<ReachController>>,
     foot_state: Single<&IkChainState, With<FootController>>,
+    foot_rig: Single<&FullBodyIkRigState>,
     look_state: Single<&IkChainState, With<LookController>>,
     mut diagnostics: ResMut<LabDiagnostics>,
 ) {
     diagnostics.reach_error = reach_state.last_error;
     diagnostics.foot_error = foot_state.last_error;
     diagnostics.look_error = look_state.last_error;
-    diagnostics.foot_root_offset = foot_state.suggested_root_offset;
+    diagnostics.foot_root_offset = foot_rig.combined_root_offset;
     diagnostics.debug_enabled = debug.enabled;
     diagnostics.look_alignment = (1.0 / (1.0 + look_state.last_error)).clamp(0.0, 1.0);
 }
 
-fn update_overlay(diagnostics: Res<LabDiagnostics>, mut overlay: Single<&mut Text, With<Overlay>>) {
+fn sync_lab_pane(
+    mut pane: ResMut<LabPane>,
+    mut debug: ResMut<IkDebugSettings>,
+    mut reach: Single<
+        &mut IkChain,
+        (
+            With<ReachController>,
+            Without<FootController>,
+            Without<LookController>,
+        ),
+    >,
+    mut foot: Single<
+        (&mut IkChain, &mut FootPlacement),
+        (
+            With<FootController>,
+            Without<ReachController>,
+            Without<LookController>,
+        ),
+    >,
+    mut look: Single<
+        &mut IkChain,
+        (
+            With<LookController>,
+            Without<ReachController>,
+            Without<FootController>,
+        ),
+    >,
+    mut rig: Single<&mut FullBodyIkRig>,
+    diagnostics: Res<LabDiagnostics>,
+) {
+    if pane.is_changed() && !pane.is_added() {
+        debug.enabled = pane.debug_enabled;
+        reach.solve.iterations = pane.iterations;
+        reach.solve.tolerance = pane.tolerance;
+        foot.0.solve.iterations = pane.iterations;
+        foot.0.solve.tolerance = pane.tolerance;
+        look.solve.iterations = pane.iterations;
+        look.solve.tolerance = pane.tolerance;
+        foot.1.ankle_offset = pane.ankle_offset;
+        rig.max_root_offset = pane.max_root_offset;
+    }
+
+    let pane = pane.bypass_change_detection();
+    pane.debug_enabled = debug.enabled;
+    pane.iterations = reach.solve.iterations;
+    pane.tolerance = reach.solve.tolerance;
+    pane.ankle_offset = foot.1.ankle_offset;
+    pane.max_root_offset = rig.max_root_offset;
+    pane.reach_error = diagnostics.reach_error;
+    pane.foot_error = diagnostics.foot_error;
+    pane.look_error = diagnostics.look_error;
+}
+
+fn update_overlay(
+    diagnostics: Res<LabDiagnostics>,
+    mut overlay: Single<&mut Text, With<Overlay>>,
+) {
     let mut text = String::new();
     let _ = writeln!(text, "ik crate-local lab");
     let _ = writeln!(text, "reach error: {:.3}", diagnostics.reach_error);

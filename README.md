@@ -84,6 +84,7 @@ fn setup(mut commands: Commands) {
 | `IkConstraint` | Per-joint cone or hinge limit |
 | `LookAtTarget` | Aim helper that resolves a point into a reach-orientation goal |
 | `FootPlacement` | Surface-contact helper with normal alignment and a generic root-offset hint |
+| `FullBodyIkRig` / `FullBodyIkRigState` | Root-aware coordinator that aggregates multiple chain root-offset hints into a single body/root translation |
 | `IkChainState` | Per-chain diagnostics: status, error, target, effector, suggested root offset |
 | `IkGlobalSettings` | Global defaults for iterations, tolerance, cache policy, and invalid-chain logging |
 | `IkDebugSettings` / `IkDebugDraw` | Global and per-chain debug drawing controls |
@@ -102,6 +103,7 @@ Supported in v0.1:
 - pole vectors
 - cone and hinge constraints
 - runtime debug drawing
+- root-aware multi-chain coordination for foot-placement or support-hand style full-body rigs
 
 ## Runtime Pipeline
 
@@ -126,6 +128,8 @@ The prepare/apply path resolves current-frame hierarchy transforms from `Transfo
 | `look_at` | Short aim chain with cone constraints | `cargo run -p saddle-animation-ik-example-look-at` |
 | `support_hand` | Grip-point anchoring on a moving prop with orientation blending | `cargo run -p saddle-animation-ik-example-support-hand` |
 | `multi_chain` | Mixed FABRIK and CCD stress preview with diagnostics plugins | `cargo run -p saddle-animation-ik-example-multi-chain` |
+
+Every standalone example includes a live `saddle-pane` debug panel so solve iterations, tolerances, weights, and feature-specific knobs like ankle offset or reach distance can be tuned in real time.
 
 ## Crate-Local Lab
 
@@ -152,6 +156,7 @@ Current limitations:
 - constraints are enforced by projection during solve, not by a full optimization pass
 - segment lengths are cached from the authored pose unless `IkGlobalSettings::preserve_initial_lengths` is disabled
 - the root-offset helper publishes a suggested offset; the crate does not automatically decide which gameplay entity should consume it
+- `FullBodyIkRig` is a pragmatic chain coordinator, not a dense single-pass FBIK optimizer
 
 Intentional non-goals in v0.1:
 
