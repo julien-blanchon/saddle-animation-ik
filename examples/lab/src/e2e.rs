@@ -1,6 +1,6 @@
 use bevy::prelude::*;
-use saddle_bevy_e2e::{E2ESet, action::Action};
 use saddle_animation_ik::IkSystems;
+use saddle_bevy_e2e::{E2ESet, action::Action};
 
 use crate::scenarios;
 

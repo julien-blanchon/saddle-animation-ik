@@ -2,13 +2,13 @@ mod components;
 mod config;
 mod constraints;
 mod debug;
+pub mod helpers;
 mod math;
 mod solver;
 mod systems;
 
 pub use components::{
-    FootPlacement, FullBodyIkChain, FullBodyIkRig, FullBodyIkRigState, IkChain, IkChainState,
-    IkDebugDraw, IkJoint, IkTarget, IkTargetAnchor, LookAtTarget, PoleTarget, RootOffsetHint,
+    IkChain, IkChainState, IkDebugDraw, IkJoint, IkTarget, IkTargetAnchor, PoleTarget,
 };
 pub use config::{
     IkConstraintEnforcement, IkGlobalSettings, IkSolveSettings, IkSolveStatus, IkSolver,
@@ -81,10 +81,6 @@ impl Plugin for IkPlugin {
         app.init_resource::<systems::IkRuntimeState>()
             .init_resource::<IkGlobalSettings>()
             .init_resource::<IkDebugSettings>()
-            .register_type::<FootPlacement>()
-            .register_type::<FullBodyIkChain>()
-            .register_type::<FullBodyIkRig>()
-            .register_type::<FullBodyIkRigState>()
             .register_type::<IkChain>()
             .register_type::<IkChainState>()
             .register_type::<IkConstraint>()
@@ -98,9 +94,7 @@ impl Plugin for IkPlugin {
             .register_type::<IkTargetAnchor>()
             .register_type::<IkTargetSpace>()
             .register_type::<IkWeight>()
-            .register_type::<LookAtTarget>()
             .register_type::<PoleTarget>()
-            .register_type::<RootOffsetHint>()
             .add_systems(self.activate_schedule, systems::activate_runtime)
             .add_systems(self.deactivate_schedule, systems::deactivate_runtime)
             .configure_sets(
@@ -116,18 +110,11 @@ impl Plugin for IkPlugin {
             .add_systems(
                 self.update_schedule,
                 (
-                    (
-                        systems::ensure_chain_state,
-                        systems::ensure_full_body_rig_state,
-                        systems::capture_full_body_authored_roots,
-                        systems::prepare_chains,
-                    )
+                    (systems::ensure_chain_state, systems::prepare_chains)
                         .chain()
                         .in_set(IkSystems::Prepare),
                     systems::solve_chains.in_set(IkSystems::Solve),
-                    (systems::apply_chains, systems::apply_full_body_rigs)
-                        .chain()
-                        .in_set(IkSystems::Apply),
+                    systems::apply_chains.in_set(IkSystems::Apply),
                 )
                     .run_if(systems::runtime_is_active),
             );

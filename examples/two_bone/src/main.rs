@@ -1,11 +1,13 @@
 use saddle_animation_ik_example_support as support;
 
+use std::fmt::Write as _;
+
 use bevy::prelude::*;
-use saddle_pane::prelude::*;
 use saddle_animation_ik::{
     IkChain, IkConstraint, IkDebugSettings, IkPlugin, IkSolver, IkTarget, IkTargetAnchor,
     PoleTarget,
 };
+use saddle_pane::prelude::*;
 use support::{OrbitMotion, animate_orbits, setup_scene, spawn_joint_chain, spawn_target};
 
 #[derive(Component)]
@@ -13,6 +15,9 @@ struct PoleMarker;
 
 #[derive(Component)]
 struct TwoBoneController;
+
+#[derive(Component)]
+struct Overlay;
 
 #[derive(Resource, Pane)]
 #[pane(title = "IK Two Bone")]
@@ -65,7 +70,15 @@ fn main() {
         .register_pane::<TwoBonePane>()
         .add_plugins(IkPlugin::default())
         .add_systems(Startup, setup)
-        .add_systems(Update, (animate_orbits, sync_pole_target, sync_two_bone_pane))
+        .add_systems(
+            Update,
+            (
+                animate_orbits,
+                sync_pole_target,
+                sync_two_bone_pane,
+                update_overlay,
+            ),
+        )
         .run();
 }
 
@@ -153,6 +166,26 @@ fn setup(
             ..default()
         },
     ));
+
+    commands.spawn((
+        Name::new("Overlay"),
+        Overlay,
+        Node {
+            position_type: PositionType::Absolute,
+            left: px(14.0),
+            top: px(14.0),
+            width: px(400.0),
+            padding: UiRect::all(px(8.0)),
+            ..default()
+        },
+        BackgroundColor(Color::srgba(0.06, 0.07, 0.09, 0.82)),
+        Text::new(String::new()),
+        TextFont {
+            font_size: 14.0,
+            ..default()
+        },
+        TextColor(Color::WHITE),
+    ));
 }
 
 fn sync_pole_target(
@@ -165,7 +198,14 @@ fn sync_pole_target(
 fn sync_two_bone_pane(
     mut pane: ResMut<TwoBonePane>,
     mut debug: ResMut<IkDebugSettings>,
-    mut controller: Single<(&mut IkChain, &mut PoleTarget, &saddle_animation_ik::IkChainState), With<TwoBoneController>>,
+    mut controller: Single<
+        (
+            &mut IkChain,
+            &mut PoleTarget,
+            &saddle_animation_ik::IkChainState,
+        ),
+        With<TwoBoneController>,
+    >,
 ) {
     if pane.is_changed() && !pane.is_added() {
         debug.enabled = pane.debug_enabled;
@@ -182,4 +222,14 @@ fn sync_two_bone_pane(
     pane.overall_weight = controller.0.weight.overall;
     pane.pole_weight = controller.1.weight;
     pane.reach_error = controller.2.last_error;
+}
+
+fn update_overlay(pane: Res<TwoBonePane>, mut overlay: Single<&mut Text, With<Overlay>>) {
+    let mut text = String::new();
+    let _ = writeln!(text, "TWO-BONE IK");
+    let _ = writeln!(text, "Target and pole markers orbit automatically");
+    let _ = writeln!(text, "Use the pane to tune solver and pole influence");
+    let _ = writeln!(text);
+    let _ = writeln!(text, "reach error: {:.3}", pane.reach_error);
+    overlay.0 = text;
 }

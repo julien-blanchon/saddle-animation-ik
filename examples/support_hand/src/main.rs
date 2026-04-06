@@ -1,12 +1,13 @@
 use saddle_animation_ik_example_support as support;
 
 use std::f32::consts::FRAC_PI_2;
+use std::fmt::Write as _;
 
 use bevy::prelude::*;
-use saddle_pane::prelude::*;
 use saddle_animation_ik::{
     IkChain, IkDebugSettings, IkJoint, IkPlugin, IkTarget, IkTargetAnchor, IkWeight,
 };
+use saddle_pane::prelude::*;
 use support::{setup_scene, spawn_joint_chain};
 
 #[derive(Component)]
@@ -14,6 +15,9 @@ struct GripRig;
 
 #[derive(Component)]
 struct SupportHandController;
+
+#[derive(Component)]
+struct Overlay;
 
 #[derive(Resource, Pane)]
 #[pane(title = "IK Support Hand")]
@@ -66,7 +70,10 @@ fn main() {
         .register_pane::<SupportHandPane>()
         .add_plugins(IkPlugin::default())
         .add_systems(Startup, setup)
-        .add_systems(Update, (animate_grip_rig, sync_support_hand_pane))
+        .add_systems(
+            Update,
+            (animate_grip_rig, sync_support_hand_pane, update_overlay),
+        )
         .run();
 }
 
@@ -166,6 +173,26 @@ fn setup(
             rotation_offset: Quat::from_rotation_x(-FRAC_PI_2),
         },
     ));
+
+    commands.spawn((
+        Name::new("Overlay"),
+        Overlay,
+        Node {
+            position_type: PositionType::Absolute,
+            left: px(14.0),
+            top: px(14.0),
+            width: px(400.0),
+            padding: UiRect::all(px(8.0)),
+            ..default()
+        },
+        BackgroundColor(Color::srgba(0.06, 0.07, 0.09, 0.82)),
+        Text::new(String::new()),
+        TextFont {
+            font_size: 14.0,
+            ..default()
+        },
+        TextColor(Color::WHITE),
+    ));
 }
 
 fn animate_grip_rig(time: Res<Time>, mut grip_rig: Single<&mut Transform, With<GripRig>>) {
@@ -186,7 +213,14 @@ fn animate_grip_rig(time: Res<Time>, mut grip_rig: Single<&mut Transform, With<G
 fn sync_support_hand_pane(
     mut pane: ResMut<SupportHandPane>,
     mut debug: ResMut<IkDebugSettings>,
-    mut controller: Single<(&mut IkChain, &mut IkTarget, &saddle_animation_ik::IkChainState), With<SupportHandController>>,
+    mut controller: Single<
+        (
+            &mut IkChain,
+            &mut IkTarget,
+            &saddle_animation_ik::IkChainState,
+        ),
+        With<SupportHandController>,
+    >,
 ) {
     if pane.is_changed() && !pane.is_added() {
         debug.enabled = pane.debug_enabled;
@@ -203,4 +237,14 @@ fn sync_support_hand_pane(
     pane.overall_weight = controller.0.weight.overall;
     pane.rotation_weight = controller.1.weight.rotation;
     pane.grip_error = controller.2.last_error;
+}
+
+fn update_overlay(pane: Res<SupportHandPane>, mut overlay: Single<&mut Text, With<Overlay>>) {
+    let mut text = String::new();
+    let _ = writeln!(text, "SUPPORT HAND IK");
+    let _ = writeln!(text, "Moving rig drives a grip point through space");
+    let _ = writeln!(text, "Use the pane to tune solve and rotation weights");
+    let _ = writeln!(text);
+    let _ = writeln!(text, "grip error: {:.3}", pane.grip_error);
+    overlay.0 = text;
 }

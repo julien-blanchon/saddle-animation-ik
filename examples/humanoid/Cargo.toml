@@ -1,0 +1,14 @@
+[package]
+name = "saddle-animation-ik-example-humanoid"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+bevy = { workspace = true }
+saddle-animation-ik = { workspace = true }
+saddle-animation-ik-example-support = { path = "../support" }
+saddle-pane = { workspace = true }
+
+[lints]
+workspace = true

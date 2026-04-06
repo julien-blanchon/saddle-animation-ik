@@ -1,3 +1,5 @@
+pub mod humanoid;
+
 use bevy::prelude::*;
 use saddle_animation_ik::IkJoint;
 

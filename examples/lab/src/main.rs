@@ -12,12 +12,12 @@ use bevy::prelude::*;
 use bevy::remote::{RemotePlugin, http::RemoteHttpPlugin};
 #[cfg(feature = "dev")]
 use bevy_brp_extras::BrpExtrasPlugin;
-use saddle_pane::prelude::*;
 use saddle_animation_ik::{
-    FootPlacement, FullBodyIkRig, FullBodyIkRigState, IkChain, IkChainState, IkConstraint,
-    IkDebugDraw, IkDebugSettings, IkJoint, IkPlugin, IkTarget, IkTargetAnchor, LookAtTarget,
-    PoleTarget,
+    IkChain, IkChainState, IkConstraint, IkDebugDraw, IkDebugSettings, IkJoint, IkPlugin, IkSolver,
+    IkTarget, IkTargetAnchor, PoleTarget,
+    helpers::{FootPlacement, FullBodyIkRig, FullBodyIkRigState, IkRigHelpersPlugin, LookAtTarget},
 };
+use saddle_pane::prelude::*;
 use support::{OrbitMotion, animate_orbits, setup_scene, spawn_joint_chain, spawn_target};
 
 const PELVIS_BASE: Vec3 = Vec3::new(0.0, 2.9, 0.0);
@@ -29,6 +29,9 @@ pub(crate) struct ReachController;
 pub(crate) struct FootController;
 
 #[derive(Component)]
+pub(crate) struct CraneController;
+
+#[derive(Component)]
 pub(crate) struct LookController;
 
 #[derive(Component)]
@@ -36,6 +39,9 @@ pub(crate) struct ReachTarget;
 
 #[derive(Component)]
 pub(crate) struct FootProbe;
+
+#[derive(Component)]
+pub(crate) struct CraneTarget;
 
 #[derive(Component)]
 pub(crate) struct LookTarget;
@@ -54,6 +60,7 @@ struct Overlay;
 pub struct LabDiagnostics {
     pub reach_error: f32,
     pub foot_error: f32,
+    pub crane_error: f32,
     pub look_error: f32,
     pub foot_root_offset: Vec3,
     pub look_alignment: f32,
@@ -78,6 +85,8 @@ struct LabPane {
     #[pane(tab = "Runtime", monitor)]
     foot_error: f32,
     #[pane(tab = "Runtime", monitor)]
+    crane_error: f32,
+    #[pane(tab = "Runtime", monitor)]
     look_error: f32,
 }
 
@@ -91,6 +100,7 @@ impl Default for LabPane {
             max_root_offset: 0.4,
             reach_error: 0.0,
             foot_error: 0.0,
+            crane_error: 0.0,
             look_error: 0.0,
         }
     }
@@ -101,6 +111,7 @@ impl Default for LabDiagnostics {
         Self {
             reach_error: 0.0,
             foot_error: 0.0,
+            crane_error: 0.0,
             look_error: 0.0,
             foot_root_offset: Vec3::ZERO,
             look_alignment: 0.0,
@@ -139,7 +150,7 @@ fn main() {
     ));
     #[cfg(feature = "e2e")]
     app.add_plugins(e2e::IkLabE2EPlugin);
-    app.add_plugins(IkPlugin::default());
+    app.add_plugins((IkPlugin::default(), IkRigHelpersPlugin::default()));
     app.add_systems(Startup, setup);
     app.add_systems(
         Update,
@@ -179,6 +190,7 @@ fn setup(
 
     setup_reach_section(&mut commands, &mut meshes, &mut materials);
     setup_foot_section(&mut commands, &mut meshes, &mut materials);
+    setup_crane_section(&mut commands, &mut meshes, &mut materials);
     setup_look_section(&mut commands, &mut meshes, &mut materials);
 
     commands.spawn((
@@ -335,23 +347,23 @@ fn setup_foot_section(
 
     let foot_controller = commands
         .spawn((
-        Name::new("Foot Controller"),
-        FootController,
-        IkDebugDraw::default(),
-        IkChain {
-            joints,
-            ..default()
-        },
-        FootPlacement {
-            contact_point: Vec3::new(-1.4, 0.18, -0.7),
-            contact_normal: Vec3::Y,
-            ankle_offset: 0.08,
-            foot_up_axis: Vec3::Y,
-            foot_forward_axis: Vec3::Z,
-            root_offset_hint: Some(default()),
-            ..default()
-        },
-    ))
+            Name::new("Foot Controller"),
+            FootController,
+            IkDebugDraw::default(),
+            IkChain {
+                joints,
+                ..default()
+            },
+            FootPlacement {
+                contact_point: Vec3::new(-1.4, 0.18, -0.7),
+                contact_normal: Vec3::Y,
+                ankle_offset: 0.08,
+                foot_up_axis: Vec3::Y,
+                foot_forward_axis: Vec3::Z,
+                root_offset_hint: Some(default()),
+                ..default()
+            },
+        ))
         .id();
     commands.spawn((
         Name::new("Foot Full Body Rig"),
@@ -359,6 +371,78 @@ fn setup_foot_section(
             .with_chain(foot_controller)
             .with_root_axis(Vec3::Y)
             .with_max_root_offset(0.4),
+    ));
+}
+
+fn setup_crane_section(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+) {
+    commands.spawn((
+        Name::new("Crane Base"),
+        Mesh3d(meshes.add(Cylinder::new(0.35, 2.2))),
+        MeshMaterial3d(materials.add(StandardMaterial {
+            base_color: Color::srgb(0.44, 0.32, 0.18),
+            metallic: 0.15,
+            perceptual_roughness: 0.85,
+            ..default()
+        })),
+        Transform::from_xyz(0.0, 1.1, -6.2),
+    ));
+
+    let target = spawn_target(
+        commands,
+        meshes,
+        materials,
+        "Crane Target",
+        Vec3::new(1.6, 3.4, -4.6),
+        Color::srgb(1.0, 0.62, 0.18),
+    );
+    commands.entity(target).insert((
+        CraneTarget,
+        OrbitMotion {
+            center: Vec3::new(0.8, 3.1, -5.2),
+            radius: Vec3::new(1.35, 0.55, 1.15),
+            speed: 0.72,
+            phase: 0.4,
+        },
+    ));
+
+    let joints = spawn_joint_chain(
+        commands,
+        meshes,
+        materials,
+        "Crane Arm",
+        Transform::from_xyz(-0.6, 2.2, -6.2),
+        &[1.0, 0.95, 0.82, 0.72],
+        Vec3::new(0.45, 0.85, 0.1).normalize(),
+        Color::srgb(0.96, 0.72, 0.28),
+        default(),
+    );
+
+    commands.spawn((
+        Name::new("Crane Controller"),
+        CraneController,
+        IkDebugDraw {
+            color: Color::srgb(0.98, 0.76, 0.28),
+            ..default()
+        },
+        IkChain {
+            joints,
+            solver: IkSolver::Fabrik,
+            ..default()
+        },
+        IkTarget::default(),
+        IkTargetAnchor {
+            entity: target,
+            translation_offset: Vec3::ZERO,
+            rotation_offset: Quat::IDENTITY,
+        },
+        PoleTarget {
+            point: Vec3::new(1.2, 3.6, -2.8),
+            ..default()
+        },
     ));
 }
 
@@ -473,11 +557,13 @@ fn update_diagnostics(
     reach_state: Single<&IkChainState, With<ReachController>>,
     foot_state: Single<&IkChainState, With<FootController>>,
     foot_rig: Single<&FullBodyIkRigState>,
+    crane_state: Single<&IkChainState, With<CraneController>>,
     look_state: Single<&IkChainState, With<LookController>>,
     mut diagnostics: ResMut<LabDiagnostics>,
 ) {
     diagnostics.reach_error = reach_state.last_error;
     diagnostics.foot_error = foot_state.last_error;
+    diagnostics.crane_error = crane_state.last_error;
     diagnostics.look_error = look_state.last_error;
     diagnostics.foot_root_offset = foot_rig.combined_root_offset;
     diagnostics.debug_enabled = debug.enabled;
@@ -500,6 +586,16 @@ fn sync_lab_pane(
         (
             With<FootController>,
             Without<ReachController>,
+            Without<CraneController>,
+            Without<LookController>,
+        ),
+    >,
+    mut crane: Single<
+        &mut IkChain,
+        (
+            With<CraneController>,
+            Without<ReachController>,
+            Without<FootController>,
             Without<LookController>,
         ),
     >,
@@ -509,6 +605,7 @@ fn sync_lab_pane(
             With<LookController>,
             Without<ReachController>,
             Without<FootController>,
+            Without<CraneController>,
         ),
     >,
     mut rig: Single<&mut FullBodyIkRig>,
@@ -520,6 +617,8 @@ fn sync_lab_pane(
         reach.solve.tolerance = pane.tolerance;
         foot.0.solve.iterations = pane.iterations;
         foot.0.solve.tolerance = pane.tolerance;
+        crane.solve.iterations = pane.iterations;
+        crane.solve.tolerance = pane.tolerance;
         look.solve.iterations = pane.iterations;
         look.solve.tolerance = pane.tolerance;
         foot.1.ankle_offset = pane.ankle_offset;
@@ -534,17 +633,19 @@ fn sync_lab_pane(
     pane.max_root_offset = rig.max_root_offset;
     pane.reach_error = diagnostics.reach_error;
     pane.foot_error = diagnostics.foot_error;
+    pane.crane_error = diagnostics.crane_error;
     pane.look_error = diagnostics.look_error;
 }
 
-fn update_overlay(
-    diagnostics: Res<LabDiagnostics>,
-    mut overlay: Single<&mut Text, With<Overlay>>,
-) {
+fn update_overlay(diagnostics: Res<LabDiagnostics>, mut overlay: Single<&mut Text, With<Overlay>>) {
     let mut text = String::new();
     let _ = writeln!(text, "ik crate-local lab");
+    let _ = writeln!(text, "Sections: reach, foot, crane, look");
+    let _ = writeln!(text, "Use the pane to tune shared solve settings");
+    let _ = writeln!(text);
     let _ = writeln!(text, "reach error: {:.3}", diagnostics.reach_error);
     let _ = writeln!(text, "foot error: {:.3}", diagnostics.foot_error);
+    let _ = writeln!(text, "crane error: {:.3}", diagnostics.crane_error);
     let _ = writeln!(
         text,
         "root offset: ({:.2}, {:.2}, {:.2})",

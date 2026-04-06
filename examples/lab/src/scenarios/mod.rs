@@ -1,6 +1,6 @@
 use bevy::prelude::*;
-use saddle_bevy_e2e::{action::Action, actions::assertions, scenario::Scenario};
 use saddle_animation_ik::IkDebugSettings;
+use saddle_bevy_e2e::{action::Action, actions::assertions, scenario::Scenario};
 
 use crate::LabDiagnostics;
 
@@ -9,6 +9,7 @@ pub fn list_scenarios() -> Vec<&'static str> {
         "ik_smoke",
         "ik_reach_target",
         "ik_foot_placement",
+        "ik_crane_arm",
         "ik_constraint_debug",
     ]
 }
@@ -18,6 +19,7 @@ pub fn scenario_by_name(name: &str) -> Option<Scenario> {
         "ik_smoke" => Some(ik_smoke()),
         "ik_reach_target" => Some(ik_reach_target()),
         "ik_foot_placement" => Some(ik_foot_placement()),
+        "ik_crane_arm" => Some(ik_crane_arm()),
         "ik_constraint_debug" => Some(ik_constraint_debug()),
         _ => None,
     }
@@ -72,6 +74,7 @@ fn ik_smoke() -> Scenario {
             let diagnostics = world.resource::<LabDiagnostics>();
             diagnostics.reach_error < 1.0
                 && diagnostics.foot_error < 1.0
+                && diagnostics.crane_error < 1.0
                 && diagnostics.look_error < 3.5
         }))
         .then(Action::Screenshot("ik_smoke".into()))
@@ -131,6 +134,34 @@ fn ik_foot_placement() -> Scenario {
         .then(Action::Screenshot("foot_high_step".into()))
         .then(Action::WaitFrames(1))
         .then(assertions::log_summary("ik_foot_placement"))
+        .build()
+}
+
+fn ik_crane_arm() -> Scenario {
+    Scenario::builder("ik_crane_arm")
+        .description("Move the crane arm target through two non-character poses, verify the chain settles, and capture both checkpoints.")
+        .then(Action::WaitFrames(30))
+        .then(set_transform(
+            "Crane Target",
+            Vec3::new(1.8, 3.2, -4.2),
+        ))
+        .then(Action::WaitFrames(18))
+        .then(assertions::custom("crane error stays low at pose A", |world| {
+            world.resource::<LabDiagnostics>().crane_error < 0.28
+        }))
+        .then(Action::Screenshot("crane_pose_a".into()))
+        .then(Action::WaitFrames(1))
+        .then(set_transform(
+            "Crane Target",
+            Vec3::new(-0.2, 3.7, -6.6),
+        ))
+        .then(Action::WaitFrames(22))
+        .then(assertions::custom("crane error stays low at pose B", |world| {
+            world.resource::<LabDiagnostics>().crane_error < 0.35
+        }))
+        .then(Action::Screenshot("crane_pose_b".into()))
+        .then(Action::WaitFrames(1))
+        .then(assertions::log_summary("ik_crane_arm"))
         .build()
 }
 

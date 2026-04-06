@@ -4959,6 +4959,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "saddle-animation-ik-example-humanoid"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "saddle-animation-ik",
+ "saddle-animation-ik-example-support",
+ "saddle-pane",
+]
+
+[[package]]
 name = "saddle-animation-ik-example-look-at"
 version = "0.1.0"
 dependencies = [

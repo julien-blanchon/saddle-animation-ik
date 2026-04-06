@@ -4,10 +4,14 @@ use bevy::{
 };
 
 use crate::{
-    FootPlacement, FullBodyIkChain, FullBodyIkRig, FullBodyIkRigState, IkChain, IkChainState,
-    IkConstraint, IkDebugSettings, IkJoint, IkPlugin, IkSolveSettings, IkSolveStatus, IkSolver,
-    IkTarget, IkTargetSpace, IkWeight, LookAtTarget, PoleTarget, ResolvedPole, ResolvedTarget,
-    SolverChainState, SolverJointState, compute_root_offset_hint, solve_chain,
+    IkChain, IkChainState, IkConstraint, IkDebugSettings, IkJoint, IkPlugin, IkSolveSettings,
+    IkSolveStatus, IkSolver, IkTarget, IkTargetSpace, IkWeight, PoleTarget, ResolvedPole,
+    ResolvedTarget, SolverChainState, SolverJointState, compute_root_offset_hint,
+    helpers::{
+        FootPlacement, FullBodyIkChain, FullBodyIkRig, FullBodyIkRigState, IkRigHelpersPlugin,
+        IkRootOffsetState, LookAtTarget,
+    },
+    solve_chain,
 };
 
 fn straight_chain() -> SolverChainState {
@@ -472,10 +476,101 @@ fn local_space_targets_use_current_entity_transform() {
 }
 
 #[test]
+fn look_at_helper_plugin_resolves_into_core_targets() {
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins);
+    app.add_plugins(IkPlugin::always_on(Update));
+    app.add_plugins(IkRigHelpersPlugin::default());
+
+    let root = app
+        .world_mut()
+        .spawn((Transform::from_xyz(0.0, 0.0, 0.0), IkJoint::default()))
+        .id();
+    let mid = app
+        .world_mut()
+        .spawn((Transform::from_xyz(0.0, 1.0, 0.0), IkJoint::default()))
+        .id();
+    let tip = app
+        .world_mut()
+        .spawn((Transform::from_xyz(0.0, 1.0, 0.0), IkJoint::default()))
+        .id();
+    app.world_mut().entity_mut(root).add_child(mid);
+    app.world_mut().entity_mut(mid).add_child(tip);
+
+    let look_point = Vec3::new(1.2, 1.4, 0.6);
+    let controller = app
+        .world_mut()
+        .spawn((
+            IkChain {
+                joints: vec![root, mid, tip],
+                ..default()
+            },
+            LookAtTarget {
+                point: look_point,
+                ..default()
+            },
+        ))
+        .id();
+
+    app.update();
+    app.update();
+
+    let expected_target = look_point.normalize() * 2.0;
+    let state = app.world().get::<IkChainState>(controller).unwrap();
+    assert!((state.target_position - expected_target).length() < 0.001);
+    assert!(state.last_error < 0.05);
+
+    let tip_transform = app.world().get::<Transform>(tip).unwrap();
+    assert!(tip_transform.rotation.dot(Quat::IDENTITY).abs() < 0.999);
+}
+
+#[test]
+fn foot_placement_helper_plugin_emits_root_offset_state() {
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins);
+    app.add_plugins(IkPlugin::always_on(Update));
+    app.add_plugins(IkRigHelpersPlugin::default());
+
+    let root = app
+        .world_mut()
+        .spawn((Transform::from_xyz(0.0, 0.0, 0.0), IkJoint::default()))
+        .id();
+    let tip = app
+        .world_mut()
+        .spawn((Transform::from_xyz(0.0, 1.0, 0.0), IkJoint::default()))
+        .id();
+    app.world_mut().entity_mut(root).add_child(tip);
+
+    let controller = app
+        .world_mut()
+        .spawn((
+            IkChain {
+                joints: vec![root, tip],
+                ..default()
+            },
+            FootPlacement {
+                contact_point: Vec3::new(0.0, 2.0, 0.0),
+                ankle_offset: 0.0,
+                root_offset_hint: Some(default()),
+                ..default()
+            },
+        ))
+        .id();
+
+    app.update();
+    app.update();
+
+    let root_offset = app.world().get::<IkRootOffsetState>(controller).unwrap();
+    assert!(root_offset.suggested_root_offset.y > 0.0);
+    assert!(root_offset.suggested_root_offset.y <= 0.35);
+}
+
+#[test]
 fn full_body_rig_aggregates_chain_root_offsets() {
     let mut app = App::new();
     app.add_plugins(MinimalPlugins);
     app.add_plugins(IkPlugin::always_on(Update));
+    app.add_plugins(IkRigHelpersPlugin::default());
 
     let root = app
         .world_mut()
@@ -486,19 +581,27 @@ fn full_body_rig_aggregates_chain_root_offsets() {
         .id();
     let left_chain = app
         .world_mut()
-        .spawn(IkChainState {
-            suggested_root_offset: Vec3::new(0.0, 0.2, 0.0),
-            last_error: 0.08,
-            ..default()
-        })
+        .spawn((
+            IkChainState {
+                last_error: 0.08,
+                ..default()
+            },
+            IkRootOffsetState {
+                suggested_root_offset: Vec3::new(0.0, 0.2, 0.0),
+            },
+        ))
         .id();
     let right_chain = app
         .world_mut()
-        .spawn(IkChainState {
-            suggested_root_offset: Vec3::new(0.0, 0.4, 0.0),
-            last_error: 0.14,
-            ..default()
-        })
+        .spawn((
+            IkChainState {
+                last_error: 0.14,
+                ..default()
+            },
+            IkRootOffsetState {
+                suggested_root_offset: Vec3::new(0.0, 0.4, 0.0),
+            },
+        ))
         .id();
 
     let rig = app
@@ -532,6 +635,7 @@ fn full_body_rig_aggregates_chain_root_offsets() {
 fn _api_surface_examples(
     _foot: FootPlacement,
     _look_at: LookAtTarget,
+    _root_offset: IkRootOffsetState,
     _pole: PoleTarget,
     _rig: FullBodyIkRig,
 ) {

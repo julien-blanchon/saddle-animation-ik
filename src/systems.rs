@@ -5,13 +5,9 @@ use bevy::prelude::*;
 use bevy::transform::helper::TransformHelper;
 
 use crate::{
-    components::{
-        FootPlacement, FullBodyIkRig, FullBodyIkRigState, IkChain, IkChainState, IkJoint, IkTarget,
-        IkTargetAnchor, LookAtTarget, PoleTarget,
-    },
+    components::{IkChain, IkChainState, IkJoint, IkTarget, IkTargetAnchor, PoleTarget},
     config::{IkGlobalSettings, IkSolveStatus, IkWeight},
     constraints::IkConstraint,
-    math::{compute_root_offset_hint, orientation_from_axes, safe_normalize},
     solver::{ResolvedPole, ResolvedTarget, SolverChainState, SolverJointState, solve_chain},
 };
 
@@ -35,7 +31,6 @@ pub(crate) struct IkPreparedChain {
     pub constraints: Vec<Option<IkConstraint>>,
     pub target: ResolvedTarget,
     pub pole: Option<ResolvedPole>,
-    pub suggested_root_offset: Vec3,
     pub total_length: f32,
 }
 
@@ -46,6 +41,16 @@ pub(crate) struct IkSolvedChain {
     pub error: f32,
     pub unreachable: bool,
     pub status: IkSolveStatus,
+}
+
+#[derive(Component, Clone, Copy, Debug)]
+pub(crate) enum IkTargetOverride {
+    Valid {
+        position: Vec3,
+        orientation: Option<Quat>,
+        weight_override: Option<IkWeight>,
+    },
+    Invalid,
 }
 
 pub(crate) fn activate_runtime(mut runtime: ResMut<IkRuntimeState>) {
@@ -78,31 +83,6 @@ pub(crate) fn ensure_chain_state(
     }
 }
 
-pub(crate) fn ensure_full_body_rig_state(
-    mut commands: Commands,
-    rigs: Query<(Entity, Option<&FullBodyIkRigState>), With<FullBodyIkRig>>,
-) {
-    for (entity, state) in &rigs {
-        if state.is_none() {
-            commands
-                .entity(entity)
-                .insert(FullBodyIkRigState::default());
-        }
-    }
-}
-
-pub(crate) fn capture_full_body_authored_roots(
-    mut rigs: Query<(&FullBodyIkRig, &mut FullBodyIkRigState)>,
-    roots: Query<&Transform>,
-) {
-    for (rig, mut state) in &mut rigs {
-        let Ok(root) = roots.get(rig.root_entity) else {
-            continue;
-        };
-        state.authored_root_translation = root.translation;
-    }
-}
-
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn prepare_chains(
     mut commands: Commands,
@@ -115,23 +95,13 @@ pub(crate) fn prepare_chains(
         Option<&IkTarget>,
         Option<&IkTargetAnchor>,
         Option<&PoleTarget>,
-        Option<&LookAtTarget>,
-        Option<&FootPlacement>,
+        Option<&IkTargetOverride>,
     )>,
     joint_queries: Query<(Option<&IkJoint>, Option<&IkConstraint>)>,
     transform_helper: TransformHelper,
 ) {
-    for (
-        entity,
-        chain,
-        mut cache,
-        mut state,
-        target,
-        target_anchor,
-        pole,
-        look_at,
-        foot_placement,
-    ) in &mut chains
+    for (entity, chain, mut cache, mut state, target, target_anchor, pole, target_override) in
+        &mut chains
     {
         state.status = if chain.enabled {
             IkSolveStatus::ReachedLimit
@@ -143,7 +113,6 @@ pub(crate) fn prepare_chains(
             state.cache_ready = false;
             state.last_error = 0.0;
             state.unreachable = false;
-            state.suggested_root_offset = Vec3::ZERO;
             commands
                 .entity(entity)
                 .remove::<IkPreparedChain>()
@@ -158,8 +127,7 @@ pub(crate) fn prepare_chains(
             target,
             target_anchor,
             pole,
-            look_at,
-            foot_placement,
+            target_override,
             &joint_queries,
             &transform_helper,
             &globals,
@@ -174,7 +142,6 @@ pub(crate) fn prepare_chains(
         state.cache_ready = true;
         state.total_length = prepared.total_length;
         state.target_position = prepared.target.position;
-        state.suggested_root_offset = prepared.suggested_root_offset;
 
         commands.entity(entity).insert(prepared);
     }
@@ -307,70 +274,6 @@ pub(crate) fn apply_chains(
     }
 }
 
-pub(crate) fn apply_full_body_rigs(
-    mut rigs: Query<(&FullBodyIkRig, &mut FullBodyIkRigState)>,
-    chain_states: Query<&IkChainState>,
-    mut transforms: Query<&mut Transform>,
-) {
-    for (rig, mut state) in &mut rigs {
-        if !rig.enabled {
-            state.combined_root_offset = Vec3::ZERO;
-            state.active_chains = 0;
-            state.max_chain_error = 0.0;
-            continue;
-        }
-
-        let mut weighted_offset = Vec3::ZERO;
-        let mut total_influence = 0.0;
-        let mut active_chains = 0usize;
-        let mut max_chain_error = 0.0f32;
-
-        for chain in &rig.chains {
-            if !chain.influence.is_finite() || chain.influence <= 0.0 {
-                continue;
-            }
-
-            let Ok(chain_state) = chain_states.get(chain.chain_entity) else {
-                continue;
-            };
-            if !chain_state.suggested_root_offset.is_finite() {
-                continue;
-            }
-
-            weighted_offset += chain_state.suggested_root_offset * chain.influence;
-            total_influence += chain.influence;
-            active_chains += 1;
-            max_chain_error = max_chain_error.max(chain_state.last_error);
-        }
-
-        let mut combined_offset = if total_influence > 0.0 {
-            weighted_offset / total_influence
-        } else {
-            Vec3::ZERO
-        };
-        let axis = safe_normalize(rig.root_axis, Vec3::Y);
-        combined_offset = axis * combined_offset.dot(axis);
-
-        let max_root_offset = rig.max_root_offset.max(0.0);
-        if combined_offset.length_squared() > max_root_offset * max_root_offset
-            && max_root_offset > 0.0
-        {
-            combined_offset = combined_offset.normalize_or_zero() * max_root_offset;
-        }
-        combined_offset *= rig.root_blend.clamp(0.0, 1.0);
-
-        state.combined_root_offset = combined_offset;
-        state.active_chains = active_chains;
-        state.max_chain_error = max_chain_error;
-
-        if rig.apply_translation
-            && let Ok(mut root) = transforms.get_mut(rig.root_entity)
-        {
-            root.translation = state.authored_root_translation + combined_offset;
-        }
-    }
-}
-
 #[allow(clippy::too_many_arguments)]
 fn prepare_single_chain(
     chain: &IkChain,
@@ -379,8 +282,7 @@ fn prepare_single_chain(
     target: Option<&IkTarget>,
     target_anchor: Option<&IkTargetAnchor>,
     pole: Option<&PoleTarget>,
-    look_at: Option<&LookAtTarget>,
-    foot_placement: Option<&FootPlacement>,
+    target_override: Option<&IkTargetOverride>,
     joint_queries: &Query<(Option<&IkJoint>, Option<&IkConstraint>)>,
     transform_helper: &TransformHelper,
     globals: &IkGlobalSettings,
@@ -446,10 +348,6 @@ fn prepare_single_chain(
 
     let root_position = positions[0];
     let effector_position = *positions.last().unwrap_or(&root_position);
-    let effector_rotation = joints
-        .last()
-        .map(|joint| joint.authored_rotation)
-        .unwrap_or(Quat::IDENTITY);
     let target_active = target.is_none_or(|target| target.enabled);
     let mut resolved_target = if let Some(target) = target.filter(|target| target.enabled) {
         let Some(position) = resolve_point(target.position, target.space, transform_helper) else {
@@ -503,62 +401,20 @@ fn prepare_single_chain(
         }
     }
 
-    let mut suggested_root_offset = Vec3::ZERO;
-
-    if let Some(look_at) = look_at.filter(|look_at| look_at.enabled) {
-        let Some(point) = resolve_point(look_at.point, look_at.space, transform_helper) else {
-            return invalidate_chain_state(state);
-        };
-        let direction = safe_normalize(point - root_position, Vec3::Z);
-        let reach_distance = look_at.reach_distance.unwrap_or(cache.total_length);
-        resolved_target.position =
-            root_position + direction * reach_distance.min(cache.total_length);
-        resolved_target.orientation = Some(orientation_from_axes(
-            look_at.forward_axis,
-            look_at.up_axis,
-            direction,
-            Vec3::Y,
-        ));
-        resolved_target.weight = look_at.weight;
-    }
-
-    if let Some(foot) = foot_placement.filter(|foot| foot.enabled) {
-        let Some(contact_point) = resolve_point(foot.contact_point, foot.space, transform_helper)
-        else {
-            return invalidate_chain_state(state);
-        };
-        let contact_normal =
-            resolve_vector(foot.contact_normal, foot.space, transform_helper).unwrap_or(Vec3::Y);
-        let foot_up = safe_normalize(foot.foot_up_axis, Vec3::Y);
-        let foot_forward = safe_normalize(foot.foot_forward_axis, Vec3::Z);
-        let effector_forward = effector_rotation * foot_forward;
-        let aligned_up =
-            (effector_rotation * foot_up).lerp(contact_normal, foot.normal_blend.clamp(0.0, 1.0));
-        let planar_forward =
-            (effector_forward - aligned_up * effector_forward.dot(aligned_up)).normalize_or_zero();
-        let forward = if planar_forward.length_squared() > 0.0 {
-            planar_forward
-        } else {
-            aligned_up.any_orthonormal_vector()
-        };
-        resolved_target.position =
-            contact_point + safe_normalize(contact_normal, Vec3::Y) * foot.ankle_offset;
-        resolved_target.orientation = Some(orientation_from_axes(
-            foot_forward,
-            foot_up,
-            forward,
-            aligned_up,
-        ));
-
-        if let Some(root_hint) = foot.root_offset_hint {
-            suggested_root_offset = compute_root_offset_hint(
-                root_position,
-                resolved_target.position,
-                cache.total_length,
-                root_hint.axis,
-                root_hint.max_distance,
-                root_hint.weight,
-            );
+    if let Some(target_override) = target_override {
+        match *target_override {
+            IkTargetOverride::Valid {
+                position,
+                orientation,
+                weight_override,
+            } => {
+                resolved_target.position = position;
+                resolved_target.orientation = orientation;
+                if let Some(weight_override) = weight_override {
+                    resolved_target.weight = weight_override;
+                }
+            }
+            IkTargetOverride::Invalid => return invalidate_chain_state(state),
         }
     }
 
@@ -596,7 +452,6 @@ fn prepare_single_chain(
             rotation_weight,
         },
         pole,
-        suggested_root_offset,
         total_length: cache.total_length,
     })
 }
@@ -608,12 +463,11 @@ fn invalidate_chain_state(state: &mut IkChainState) -> Option<IkPreparedChain> {
     state.unreachable = false;
     state.target_position = Vec3::ZERO;
     state.effector_position = Vec3::ZERO;
-    state.suggested_root_offset = Vec3::ZERO;
     state.total_length = 0.0;
     None
 }
 
-fn resolve_point(
+pub(crate) fn resolve_point(
     point: Vec3,
     space: crate::config::IkTargetSpace,
     transform_helper: &TransformHelper,
@@ -631,7 +485,7 @@ fn resolve_point(
     }
 }
 
-fn resolve_vector(
+pub(crate) fn resolve_vector(
     vector: Vec3,
     space: crate::config::IkTargetSpace,
     transform_helper: &TransformHelper,
@@ -649,7 +503,7 @@ fn resolve_vector(
     }
 }
 
-fn resolve_rotation(
+pub(crate) fn resolve_rotation(
     rotation: Quat,
     space: crate::config::IkTargetSpace,
     transform_helper: &TransformHelper,

@@ -4,10 +4,11 @@ Crate-local verification app for the shared `saddle-animation-ik` crate.
 
 ## Purpose
 
-The lab keeps the shared crate testable without relying on project-level sandboxes. It shows three independent use cases in one scene:
+The lab keeps the shared crate testable without relying on project-level sandboxes. It shows four independent use cases in one scene:
 
 - generic reach with a pole vector
 - foot placement on stepped terrain with a root-offset hint
+- a non-character crane arm using only the core chain solver
 - look-at aiming with cone constraints
 
 ## Status
@@ -26,6 +27,7 @@ Targeted E2E scenarios:
 cargo run -p saddle-animation-ik-lab --features e2e -- ik_smoke
 cargo run -p saddle-animation-ik-lab --features e2e -- ik_reach_target
 cargo run -p saddle-animation-ik-lab --features e2e -- ik_foot_placement
+cargo run -p saddle-animation-ik-lab --features e2e -- ik_crane_arm
 cargo run -p saddle-animation-ik-lab --features e2e -- ik_constraint_debug
 ```
 

@@ -1,12 +1,17 @@
 use saddle_animation_ik_example_support as support;
 
+use std::fmt::Write as _;
+
 use bevy::{
     diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin},
     prelude::*,
 };
-use saddle_pane::prelude::*;
 use saddle_animation_ik::{IkChain, IkDebugSettings, IkPlugin, IkSolver, IkTarget, IkTargetAnchor};
+use saddle_pane::prelude::*;
 use support::{OrbitMotion, animate_orbits, setup_scene, spawn_joint_chain, spawn_target};
+
+#[derive(Component)]
+struct Overlay;
 
 #[derive(Resource, Pane)]
 #[pane(title = "IK Multi Chain")]
@@ -63,7 +68,10 @@ fn main() {
         .register_pane::<MultiChainPane>()
         .add_plugins(IkPlugin::default())
         .add_systems(Startup, setup)
-        .add_systems(Update, (animate_orbits, sync_multi_chain_pane))
+        .add_systems(
+            Update,
+            (animate_orbits, sync_multi_chain_pane, update_overlay),
+        )
         .run();
 }
 
@@ -133,6 +141,26 @@ fn setup(
             ));
         }
     }
+
+    commands.spawn((
+        Name::new("Overlay"),
+        Overlay,
+        Node {
+            position_type: PositionType::Absolute,
+            left: px(14.0),
+            top: px(14.0),
+            width: px(420.0),
+            padding: UiRect::all(px(8.0)),
+            ..default()
+        },
+        BackgroundColor(Color::srgba(0.06, 0.07, 0.09, 0.82)),
+        Text::new(String::new()),
+        TextFont {
+            font_size: 14.0,
+            ..default()
+        },
+        TextColor(Color::WHITE),
+    ));
 }
 
 fn sync_multi_chain_pane(
@@ -161,4 +189,15 @@ fn sync_multi_chain_pane(
     pane.debug_enabled = debug.enabled;
     pane.chain_count = chain_count;
     pane.max_error = max_error;
+}
+
+fn update_overlay(pane: Res<MultiChainPane>, mut overlay: Single<&mut Text, With<Overlay>>) {
+    let mut text = String::new();
+    let _ = writeln!(text, "MULTI-CHAIN IK");
+    let _ = writeln!(text, "20 chains mix FABRIK and CCD under one scene");
+    let _ = writeln!(text, "Use the pane to change iterations and debug drawing");
+    let _ = writeln!(text);
+    let _ = writeln!(text, "chains: {}", pane.chain_count);
+    let _ = writeln!(text, "max error: {:.3}", pane.max_error);
+    overlay.0 = text;
 }

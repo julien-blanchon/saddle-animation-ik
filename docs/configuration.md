@@ -2,6 +2,8 @@
 
 This document lists the public tuning surface for `saddle-animation-ik` in v0.1. Defaults shown here are the values returned by `Default::default()`.
 
+The core runtime is registered by `IkPlugin`. Character-oriented helpers such as look-at, foot placement, and multi-chain root coordination live under `saddle_animation_ik::helpers` and require `helpers::IkRigHelpersPlugin`.
+
 ## `IkChain`
 
 | Field | Type | Default | Valid Range | Effect | Common Failure Mode |
@@ -85,7 +87,19 @@ This document lists the public tuning surface for `saddle-animation-ik` in v0.1.
 | `max_angle` | `f32` | none | radians | Upper limit around the hinge axis | Wide limits make the hinge behave almost unconstrained |
 | `strength` | `f32` | none | `0.0..=1.0` | Clamp strength | Weak values feel mushy |
 
-## `LookAtTarget`
+## `IkChainState`
+
+| Field | Type | Default | Effect | Notes |
+| --- | --- | --- | --- | --- |
+| `status` | `IkSolveStatus` | `Disabled` | Last solve outcome for the chain | `InvalidChain` indicates bad input or missing joints |
+| `cache_ready` | `bool` | `false` | Whether segment-length cache has been established | Useful for debugging first-frame setup |
+| `last_error` | `f32` | `0.0` | Distance from effector to the resolved target after solve | Larger values usually mean low iterations or unreachable targets |
+| `unreachable` | `bool` | `false` | Whether the target exceeded the chain reach | `true` is expected for overshoot cases |
+| `target_position` | `Vec3` | `Vec3::ZERO` | Final world-space target used by the solver | Includes target anchors and helper overrides |
+| `effector_position` | `Vec3` | `Vec3::ZERO` | Final world-space effector position after solve | Compare with `target_position` to inspect miss distance |
+| `total_length` | `f32` | `0.0` | Cached total chain length used for solve | Respects `IkGlobalSettings::preserve_initial_lengths` |
+
+## `helpers::LookAtTarget`
 
 | Field | Type | Default | Valid Range | Effect | Common Failure Mode |
 | --- | --- | --- | --- | --- | --- |
@@ -97,7 +111,7 @@ This document lists the public tuning surface for `saddle-animation-ik` in v0.1.
 | `reach_distance` | `Option<f32>` | `None` | `> 0` when set | Distance from root used to place the synthetic target | Too short can keep the chain folded up |
 | `weight` | `IkWeight` | all `1.0` | `0.0..=1.0` | Blend for the generated target | Low position weight makes the aim chain look sluggish |
 
-## `FootPlacement`
+## `helpers::FootPlacement`
 
 | Field | Type | Default | Valid Range | Effect | Common Failure Mode |
 | --- | --- | --- | --- | --- | --- |
@@ -109,9 +123,9 @@ This document lists the public tuning surface for `saddle-animation-ik` in v0.1.
 | `foot_up_axis` | `Vec3` | `Vec3::Y` | non-zero | Local axis aligned to the contact normal | Wrong axis makes the foot roll incorrectly |
 | `foot_forward_axis` | `Vec3` | `Vec3::Z` | non-zero | Local forward axis preserved across the surface | Wrong axis can make the foot point sideways |
 | `normal_blend` | `f32` | `1.0` | `0.0..=1.0` | Blend toward the sampled surface normal | Full alignment on noisy normals can jitter |
-| `root_offset_hint` | `Option<RootOffsetHint>` | `None` | optional | Computes a suggested root translation | Expecting automatic pelvis motion without consuming the hint is a common misunderstanding |
+| `root_offset_hint` | `Option<helpers::RootOffsetHint>` | `None` | optional | Computes a suggested root translation | Expecting automatic pelvis motion without consuming the hint is a common misunderstanding |
 
-## `RootOffsetHint`
+## `helpers::RootOffsetHint`
 
 | Field | Type | Default | Valid Range | Effect | Common Failure Mode |
 | --- | --- | --- | --- | --- | --- |
@@ -119,26 +133,32 @@ This document lists the public tuning surface for `saddle-animation-ik` in v0.1.
 | `max_distance` | `f32` | `0.35` | `>= 0` | Clamp on the hint magnitude | Tiny values can hide useful hints |
 | `weight` | `f32` | `1.0` | `0.0..=1.0` | Blend of the final hint | Zero disables the hint |
 
-## `FullBodyIkRig`
+## `helpers::IkRootOffsetState`
+
+| Field | Type | Default | Effect | Notes |
+| --- | --- | --- | --- | --- |
+| `suggested_root_offset` | `Vec3` | `Vec3::ZERO` | Helper-produced root translation suggestion for one chain | `helpers::FullBodyIkRig` aggregates these values across multiple chains |
+
+## `helpers::FullBodyIkRig`
 
 | Field | Type | Default | Valid Range | Effect | Common Failure Mode |
 | --- | --- | --- | --- | --- | --- |
 | `enabled` | `bool` | `true` | `true` or `false` | Enables the rig coordinator | Disabled rigs stop applying coordinated root motion |
 | `root_entity` | `Entity` | required | must exist | Shared body/root entity that receives the aggregated offset | Missing roots leave the state populated but nothing moves |
-| `chains` | `Vec<FullBodyIkChain>` | `[]` | any length | Chains whose `suggested_root_offset` values feed the coordinator | Forgetting to register a chain makes the rig look inert |
+| `chains` | `Vec<helpers::FullBodyIkChain>` | `[]` | any length | Chains whose `helpers::IkRootOffsetState` values feed the coordinator | Forgetting to register a chain makes the rig look inert |
 | `root_axis` | `Vec3` | `Vec3::Y` | non-zero recommended | Axis along which the final root motion is projected | Wrong axis makes the body shift in the wrong direction |
 | `max_root_offset` | `f32` | `0.45` | `>= 0` | Clamp for the aggregated root offset magnitude | Very low values hide useful foot-placement correction |
 | `root_blend` | `f32` | `1.0` | `0.0..=1.0` | Blend factor for the final root offset | Low values make the full-body response feel mushy |
-| `apply_translation` | `bool` | `true` | `true` or `false` | Applies the result to the root transform automatically | Turning this off requires the consumer to read `FullBodyIkRigState` manually |
+| `apply_translation` | `bool` | `true` | `true` or `false` | Applies the result to the root transform automatically | Turning this off requires the consumer to read `helpers::FullBodyIkRigState` manually |
 
-## `FullBodyIkChain`
+## `helpers::FullBodyIkChain`
 
 | Field | Type | Default | Valid Range | Effect | Common Failure Mode |
 | --- | --- | --- | --- | --- | --- |
 | `chain_entity` | `Entity` | required | must exist | Source chain contributing a root-offset hint | Missing chain entities silently reduce the rig response |
 | `influence` | `f32` | `1.0` | `> 0` recommended | Relative weight of that chain in the final average | Large mismatches can make one limb dominate the full-body solve |
 
-## `FullBodyIkRigState`
+## `helpers::FullBodyIkRigState`
 
 | Field | Type | Default | Effect | Notes |
 | --- | --- | --- | --- | --- |
