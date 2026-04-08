@@ -11,6 +11,9 @@ pub fn list_scenarios() -> Vec<&'static str> {
         "ik_foot_placement",
         "ik_crane_arm",
         "ik_constraint_debug",
+        "ik_look_at",
+        "ik_multi_chain",
+        "ik_two_bone",
     ]
 }
 
@@ -21,6 +24,9 @@ pub fn scenario_by_name(name: &str) -> Option<Scenario> {
         "ik_foot_placement" => Some(ik_foot_placement()),
         "ik_crane_arm" => Some(ik_crane_arm()),
         "ik_constraint_debug" => Some(ik_constraint_debug()),
+        "ik_look_at" => Some(ik_look_at()),
+        "ik_multi_chain" => Some(ik_multi_chain()),
+        "ik_two_bone" => Some(ik_two_bone()),
         _ => None,
     }
 }
@@ -162,6 +168,142 @@ fn ik_crane_arm() -> Scenario {
         .then(Action::Screenshot("crane_pose_b".into()))
         .then(Action::WaitFrames(1))
         .then(assertions::log_summary("ik_crane_arm"))
+        .build()
+}
+
+fn ik_look_at() -> Scenario {
+    Scenario::builder("ik_look_at")
+        .description(
+            "Drive the look-at chain through a deliberate sweep across the forward/oblique range, \
+             verify the look error stays bounded at each pose, and capture a comparison screenshot \
+             before and after the sweep.",
+        )
+        .then(Action::WaitFrames(30))
+        // Front-center look
+        .then(set_transform("Look Target", Vec3::new(6.0, 2.5, 0.0)))
+        .then(Action::WaitFrames(18))
+        .then(assertions::custom(
+            "look chain tracks the center target cleanly",
+            |world| {
+                let diagnostics = world.resource::<LabDiagnostics>();
+                diagnostics.look_error.is_finite() && diagnostics.look_error < 2.0
+            },
+        ))
+        .then(assertions::custom(
+            "look alignment metric is above 0.3 at center",
+            |world| world.resource::<LabDiagnostics>().look_alignment > 0.3,
+        ))
+        .then(Action::Screenshot("look_at_center".into()))
+        .then(Action::WaitFrames(1))
+        // Sweep left
+        .then(set_transform("Look Target", Vec3::new(3.8, 3.6, 3.2)))
+        .then(Action::WaitFrames(20))
+        .then(assertions::custom(
+            "look chain tracks the swept target without numerical blowup",
+            |world| {
+                let diagnostics = world.resource::<LabDiagnostics>();
+                diagnostics.look_error.is_finite() && diagnostics.look_error < 3.5
+            },
+        ))
+        .then(Action::Screenshot("look_at_swept".into()))
+        .then(Action::WaitFrames(1))
+        .then(assertions::log_summary("ik_look_at"))
+        .build()
+}
+
+fn ik_multi_chain() -> Scenario {
+    Scenario::builder("ik_multi_chain")
+        .description(
+            "Verify that all four IK chains (reach, foot, crane, look) solve simultaneously \
+             without interfering with each other by checking every error metric stays bounded \
+             in the same frame.",
+        )
+        .then(Action::WaitFrames(45))
+        .then(assertions::custom(
+            "all four chains solved concurrently without error",
+            |world| {
+                let diagnostics = world.resource::<LabDiagnostics>();
+                diagnostics.reach_error.is_finite()
+                    && diagnostics.foot_error.is_finite()
+                    && diagnostics.crane_error.is_finite()
+                    && diagnostics.look_error.is_finite()
+            },
+        ))
+        .then(assertions::custom(
+            "reach chain error within tolerance",
+            |world| world.resource::<LabDiagnostics>().reach_error < 0.35,
+        ))
+        .then(assertions::custom(
+            "foot chain error within tolerance",
+            |world| world.resource::<LabDiagnostics>().foot_error < 0.35,
+        ))
+        .then(assertions::custom(
+            "crane chain error within tolerance",
+            |world| world.resource::<LabDiagnostics>().crane_error < 0.40,
+        ))
+        .then(assertions::custom(
+            "look chain error within tolerance",
+            |world| world.resource::<LabDiagnostics>().look_error < 3.5,
+        ))
+        .then(Action::Screenshot("ik_multi_chain_all_active".into()))
+        .then(Action::WaitFrames(1))
+        // Perturb all targets simultaneously and verify recovery
+        .then(set_transform("Reach Target", Vec3::new(-6.8, 2.6, 0.6)))
+        .then(set_transform("Crane Target", Vec3::new(1.2, 3.0, -4.8)))
+        .then(set_transform("Look Target", Vec3::new(5.5, 3.0, 1.4)))
+        .then(Action::WaitFrames(24))
+        .then(assertions::custom(
+            "all chains recover after simultaneous target moves",
+            |world| {
+                let diagnostics = world.resource::<LabDiagnostics>();
+                diagnostics.reach_error < 0.45
+                    && diagnostics.crane_error < 0.50
+                    && diagnostics.look_error < 3.5
+            },
+        ))
+        .then(Action::Screenshot("ik_multi_chain_after_perturb".into()))
+        .then(Action::WaitFrames(1))
+        .then(assertions::log_summary("ik_multi_chain"))
+        .build()
+}
+
+fn ik_two_bone() -> Scenario {
+    Scenario::builder("ik_two_bone")
+        .description(
+            "Exercise the two-segment reach chain through a near-straight and a bent pose, \
+             confirming the pole target bends the elbow in the expected direction and the chain \
+             stays within reach at both extremes.",
+        )
+        .then(Action::WaitFrames(30))
+        // Pose A: target near the chain root — forces a strong bend
+        .then(set_transform("Reach Target", Vec3::new(-7.2, 1.6, 0.6)))
+        .then(Action::WaitFrames(18))
+        .then(assertions::custom(
+            "reach chain error stays low in the bent pose",
+            |world| world.resource::<LabDiagnostics>().reach_error < 0.30,
+        ))
+        .then(Action::Screenshot("two_bone_bent".into()))
+        .then(Action::WaitFrames(1))
+        // Pose B: target near full extension
+        .then(set_transform("Reach Target", Vec3::new(-5.0, 3.4, -1.2)))
+        .then(Action::WaitFrames(20))
+        .then(assertions::custom(
+            "reach chain error stays low near full extension",
+            |world| world.resource::<LabDiagnostics>().reach_error < 0.35,
+        ))
+        .then(assertions::custom(
+            "foot and crane remain stable while reach is exercised",
+            |world| {
+                let diagnostics = world.resource::<LabDiagnostics>();
+                diagnostics.foot_error.is_finite()
+                    && diagnostics.foot_error < 0.40
+                    && diagnostics.crane_error.is_finite()
+                    && diagnostics.crane_error < 0.50
+            },
+        ))
+        .then(Action::Screenshot("two_bone_extended".into()))
+        .then(Action::WaitFrames(1))
+        .then(assertions::log_summary("ik_two_bone"))
         .build()
 }
 
