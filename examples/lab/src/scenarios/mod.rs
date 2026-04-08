@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use saddle_animation_ik::IkDebugSettings;
-use saddle_bevy_e2e::{action::Action, actions::assertions, scenario::Scenario};
+use saddle_bevy_e2e::{action::Action, actions::{assertions, inspect}, scenario::Scenario};
 
 use crate::LabDiagnostics;
 
@@ -8,6 +8,7 @@ pub fn list_scenarios() -> Vec<&'static str> {
     vec![
         "ik_smoke",
         "ik_reach_target",
+        "ik_reach_extension_limit",
         "ik_foot_placement",
         "ik_crane_arm",
         "ik_constraint_debug",
@@ -21,6 +22,7 @@ pub fn scenario_by_name(name: &str) -> Option<Scenario> {
     match name {
         "ik_smoke" => Some(ik_smoke()),
         "ik_reach_target" => Some(ik_reach_target()),
+        "ik_reach_extension_limit" => Some(ik_reach_extension_limit()),
         "ik_foot_placement" => Some(ik_foot_placement()),
         "ik_crane_arm" => Some(ik_crane_arm()),
         "ik_constraint_debug" => Some(ik_constraint_debug()),
@@ -140,6 +142,45 @@ fn ik_foot_placement() -> Scenario {
         .then(Action::Screenshot("foot_high_step".into()))
         .then(Action::WaitFrames(1))
         .then(assertions::log_summary("ik_foot_placement"))
+        .build()
+}
+
+fn ik_reach_extension_limit() -> Scenario {
+    Scenario::builder("ik_reach_extension_limit")
+        .description("Push the reach chain beyond its maximum extension, verify the solver stays finite, then bring the target back inside range and confirm recovery.")
+        .then(Action::WaitFrames(30))
+        .then(inspect::log_resource::<LabDiagnostics>("ik_reach_extension_limit_baseline"))
+        .then(set_transform(
+            "Reach Target",
+            Vec3::new(-13.5, 6.8, 0.0),
+        ))
+        .then(Action::WaitFrames(20))
+        .then(assertions::custom(
+            "overextended reach target keeps diagnostics finite",
+            |world| {
+                let diagnostics = world.resource::<LabDiagnostics>();
+                diagnostics.reach_error.is_finite()
+                    && diagnostics.foot_error.is_finite()
+                    && diagnostics.crane_error.is_finite()
+                    && diagnostics.look_error.is_finite()
+                    && diagnostics.reach_error > 0.5
+            },
+        ))
+        .then(inspect::log_resource::<LabDiagnostics>("ik_reach_extension_limit_overextended"))
+        .then(Action::Screenshot("reach_overextended".into()))
+        .then(Action::WaitFrames(1))
+        .then(set_transform(
+            "Reach Target",
+            Vec3::new(-6.2, 2.4, 0.3),
+        ))
+        .then(Action::WaitFrames(18))
+        .then(assertions::custom(
+            "reach chain recovers after returning inside range",
+            |world| world.resource::<LabDiagnostics>().reach_error < 0.35,
+        ))
+        .then(Action::Screenshot("reach_recovered".into()))
+        .then(Action::WaitFrames(1))
+        .then(assertions::log_summary("ik_reach_extension_limit"))
         .build()
 }
 
