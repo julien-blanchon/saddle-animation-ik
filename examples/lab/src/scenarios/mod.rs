@@ -3,6 +3,7 @@ use saddle_animation_ik::IkDebugSettings;
 use saddle_bevy_e2e::{action::Action, actions::{assertions, inspect}, scenario::Scenario};
 
 use crate::LabDiagnostics;
+use crate::lab_e2e_support::set_target_pose;
 
 pub fn list_scenarios() -> Vec<&'static str> {
     vec![
@@ -31,29 +32,6 @@ pub fn scenario_by_name(name: &str) -> Option<Scenario> {
         "ik_two_bone" => Some(ik_two_bone()),
         _ => None,
     }
-}
-
-fn entity_by_name(world: &mut World, name: &str) -> Option<Entity> {
-    let mut query = world.query::<(Entity, &Name)>();
-    query
-        .iter(world)
-        .find(|(_, entity_name)| entity_name.as_str() == name)
-        .map(|(entity, _)| entity)
-}
-
-fn set_transform(name: &'static str, translation: Vec3) -> Action {
-    Action::Custom(Box::new(move |world| {
-        let entity = entity_by_name(world, name).expect("named entity should exist");
-        let mut entity_ref = world.entity_mut(entity);
-        let mut transform = entity_ref
-            .get_mut::<Transform>()
-            .expect("entity should have transform");
-        transform.translation = translation;
-        if let Some(mut orbit) = entity_ref.get_mut::<crate::support::OrbitMotion>() {
-            orbit.center = translation;
-            orbit.radius = Vec3::ZERO;
-        }
-    }))
 }
 
 fn set_debug(enabled: bool) -> Action {
@@ -95,7 +73,7 @@ fn ik_reach_target() -> Scenario {
     Scenario::builder("ik_reach_target")
         .description("Move the reach target through two authored poses, verify the chain settles each time, and capture both checkpoints.")
         .then(Action::WaitFrames(30))
-        .then(set_transform(
+        .then(set_target_pose(
             "Reach Target",
             Vec3::new(-6.4, 2.4, 1.0),
         ))
@@ -105,7 +83,7 @@ fn ik_reach_target() -> Scenario {
         }))
         .then(Action::Screenshot("reach_pose_a".into()))
         .then(Action::WaitFrames(1))
-        .then(set_transform(
+        .then(set_target_pose(
             "Reach Target",
             Vec3::new(-7.3, 2.0, -1.0),
         ))
@@ -123,7 +101,7 @@ fn ik_foot_placement() -> Scenario {
     Scenario::builder("ik_foot_placement")
         .description("Move the foot probe from the low step to the high step, verify the leg adapts cleanly, and capture each step.")
         .then(Action::WaitFrames(30))
-        .then(set_transform("Foot Probe", Vec3::new(-1.4, 0.18, -0.7)))
+        .then(set_target_pose("Foot Probe", Vec3::new(-1.4, 0.18, -0.7)))
         .then(Action::WaitFrames(12))
         .then(assertions::custom("foot error is stable on the first step", |world| {
             world.resource::<LabDiagnostics>().foot_error < 0.25
@@ -134,7 +112,7 @@ fn ik_foot_placement() -> Scenario {
         }))
         .then(Action::Screenshot("foot_low_step".into()))
         .then(Action::WaitFrames(1))
-        .then(set_transform("Foot Probe", Vec3::new(1.4, 1.08, 0.7)))
+        .then(set_target_pose("Foot Probe", Vec3::new(1.4, 1.08, 0.7)))
         .then(Action::WaitFrames(18))
         .then(assertions::custom("foot error is stable on the high step", |world| {
             world.resource::<LabDiagnostics>().foot_error < 0.3
@@ -150,7 +128,7 @@ fn ik_reach_extension_limit() -> Scenario {
         .description("Push the reach chain beyond its maximum extension, verify the solver stays finite, then bring the target back inside range and confirm recovery.")
         .then(Action::WaitFrames(30))
         .then(inspect::log_resource::<LabDiagnostics>("ik_reach_extension_limit_baseline"))
-        .then(set_transform(
+        .then(set_target_pose(
             "Reach Target",
             Vec3::new(-13.5, 6.8, 0.0),
         ))
@@ -169,7 +147,7 @@ fn ik_reach_extension_limit() -> Scenario {
         .then(inspect::log_resource::<LabDiagnostics>("ik_reach_extension_limit_overextended"))
         .then(Action::Screenshot("reach_overextended".into()))
         .then(Action::WaitFrames(1))
-        .then(set_transform(
+        .then(set_target_pose(
             "Reach Target",
             Vec3::new(-6.2, 2.4, 0.3),
         ))
@@ -188,7 +166,7 @@ fn ik_crane_arm() -> Scenario {
     Scenario::builder("ik_crane_arm")
         .description("Move the crane arm target through two non-character poses, verify the chain settles, and capture both checkpoints.")
         .then(Action::WaitFrames(30))
-        .then(set_transform(
+        .then(set_target_pose(
             "Crane Target",
             Vec3::new(1.8, 3.2, -4.2),
         ))
@@ -198,7 +176,7 @@ fn ik_crane_arm() -> Scenario {
         }))
         .then(Action::Screenshot("crane_pose_a".into()))
         .then(Action::WaitFrames(1))
-        .then(set_transform(
+        .then(set_target_pose(
             "Crane Target",
             Vec3::new(-0.2, 3.7, -6.6),
         ))
@@ -221,7 +199,7 @@ fn ik_look_at() -> Scenario {
         )
         .then(Action::WaitFrames(30))
         // Front-center look
-        .then(set_transform("Look Target", Vec3::new(6.0, 2.5, 0.0)))
+        .then(set_target_pose("Look Target", Vec3::new(6.0, 2.5, 0.0)))
         .then(Action::WaitFrames(18))
         .then(assertions::custom(
             "look chain tracks the center target cleanly",
@@ -237,7 +215,7 @@ fn ik_look_at() -> Scenario {
         .then(Action::Screenshot("look_at_center".into()))
         .then(Action::WaitFrames(1))
         // Sweep left
-        .then(set_transform("Look Target", Vec3::new(3.8, 3.6, 3.2)))
+        .then(set_target_pose("Look Target", Vec3::new(3.8, 3.6, 3.2)))
         .then(Action::WaitFrames(20))
         .then(assertions::custom(
             "look chain tracks the swept target without numerical blowup",
@@ -289,9 +267,9 @@ fn ik_multi_chain() -> Scenario {
         .then(Action::Screenshot("ik_multi_chain_all_active".into()))
         .then(Action::WaitFrames(1))
         // Perturb all targets simultaneously and verify recovery
-        .then(set_transform("Reach Target", Vec3::new(-6.8, 2.6, 0.6)))
-        .then(set_transform("Crane Target", Vec3::new(1.2, 3.0, -4.8)))
-        .then(set_transform("Look Target", Vec3::new(5.5, 3.0, 1.4)))
+        .then(set_target_pose("Reach Target", Vec3::new(-6.8, 2.6, 0.6)))
+        .then(set_target_pose("Crane Target", Vec3::new(1.2, 3.0, -4.8)))
+        .then(set_target_pose("Look Target", Vec3::new(5.5, 3.0, 1.4)))
         .then(Action::WaitFrames(24))
         .then(assertions::custom(
             "all chains recover after simultaneous target moves",
@@ -317,7 +295,7 @@ fn ik_two_bone() -> Scenario {
         )
         .then(Action::WaitFrames(30))
         // Pose A: target near the chain root — forces a strong bend
-        .then(set_transform("Reach Target", Vec3::new(-7.2, 1.6, 0.6)))
+        .then(set_target_pose("Reach Target", Vec3::new(-7.2, 1.6, 0.6)))
         .then(Action::WaitFrames(18))
         .then(assertions::custom(
             "reach chain error stays low in the bent pose",
@@ -326,7 +304,7 @@ fn ik_two_bone() -> Scenario {
         .then(Action::Screenshot("two_bone_bent".into()))
         .then(Action::WaitFrames(1))
         // Pose B: target near full extension
-        .then(set_transform("Reach Target", Vec3::new(-5.0, 3.4, -1.2)))
+        .then(set_target_pose("Reach Target", Vec3::new(-5.0, 3.4, -1.2)))
         .then(Action::WaitFrames(20))
         .then(assertions::custom(
             "reach chain error stays low near full extension",
@@ -353,7 +331,7 @@ fn ik_constraint_debug() -> Scenario {
         .description("Push the look-at target to an extreme pose, keep debug rendering on, and verify the constrained chain remains stable while the debug overlay is visible.")
         .then(Action::WaitFrames(30))
         .then(set_debug(true))
-        .then(set_transform("Look Target", Vec3::new(8.8, 4.8, 3.6)))
+        .then(set_target_pose("Look Target", Vec3::new(8.8, 4.8, 3.6)))
         .then(Action::WaitFrames(20))
         .then(assertions::custom("debug rendering remains enabled", |world| {
             world.resource::<IkDebugSettings>().enabled
@@ -364,7 +342,7 @@ fn ik_constraint_debug() -> Scenario {
         }))
         .then(Action::Screenshot("constraint_debug_extreme".into()))
         .then(Action::WaitFrames(1))
-        .then(set_transform("Look Target", Vec3::new(4.8, 2.3, -2.8)))
+        .then(set_target_pose("Look Target", Vec3::new(4.8, 2.3, -2.8)))
         .then(Action::WaitFrames(18))
         .then(assertions::custom("look chain recovers after target sweep", |world| {
             world.resource::<LabDiagnostics>().look_error < 2.5
